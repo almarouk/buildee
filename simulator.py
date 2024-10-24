@@ -9,10 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def pose_3x4_to_4x4(pose: np.ndarray) -> np.ndarray:
-    return np.vstack([pose, [0, 0, 0, 1]])
-
-
 class Simulator:
     def __init__(self, blend_file: str | Path):
         # Load blender file
@@ -72,31 +68,32 @@ class Simulator:
         world_from_camera = world_from_camera.copy()
 
         # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
-        world_from_camera[:, 1:3] *= -1
+        world_from_camera[:3, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
 
         # Set the camera pose
-        self.camera.matrix_world = mathutils.Matrix(world_from_camera).to_4x4()
+        self.camera.matrix_world = mathutils.Matrix(world_from_camera)
 
     def get_camera_pose(self) -> np.ndarray:
         # Read blender camera pose
         world_from_camera = np.array(self.camera.matrix_world)
 
         # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
-        world_from_camera[:, 1:3] *= -1
+        world_from_camera[:, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
 
-        return world_from_camera[:3]
+        return world_from_camera
 
     def set_relative_camera_pose(self, camera_from_next_camera: np.ndarray):
         world_from_camera = self.get_camera_pose()
-        world_from_next_camera = pose_3x4_to_4x4(world_from_camera) @ pose_3x4_to_4x4(camera_from_next_camera)
-        self.set_camera_pose(world_from_next_camera[:3])
+        world_from_next_camera = world_from_camera @ camera_from_next_camera
+        self.set_camera_pose(world_from_next_camera)
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
         self.set_relative_camera_pose(np.array([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, distance]
+            [0.0, 0.0, 1.0, distance],
+            [0.0, 0.0, 0.0, 1.0]
         ]))
 
     def rotate_camera_yaw(self, angle: float, degrees: bool = True):
@@ -108,7 +105,8 @@ class Simulator:
         self.set_relative_camera_pose(np.array([
             [np.cos(angle), 0.0, np.sin(angle), 0.0],
             [0.0, 1.0, 0.0, 0.0],
-            [-np.sin(angle), 0.0, np.cos(angle), 0.0]
+            [-np.sin(angle), 0.0, np.cos(angle), 0.0],
+            [0.0, 0.0, 0.0, 1.0]
         ]))
 
 
