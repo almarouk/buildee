@@ -17,6 +17,9 @@ class Simulator:
         # Get the current scene
         self.scene = bpy.context.scene
 
+        # Get the current view layer
+        self.view_layer = bpy.context.view_layer
+
         # Get the current camera
         self.camera = self.scene.camera
 
@@ -63,7 +66,24 @@ class Simulator:
 
         return rgbd[:, :, :3], rgbd[:, :, 3]
 
-    def set_camera_pose(self, world_from_camera: np.ndarray):
+    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True):
+        # Check that there is no collision between current camera and new camera pose
+        if check_collisions:
+            origin = self.camera.location
+            direction = world_from_camera[:3, 3] - np.array(origin)
+            distance = float(np.linalg.norm(direction))
+
+            if distance > 1e-8:  # do not move camera if we check for collisions but the distance is too small
+                collided, collision_location, _, _, _, _ = self.scene.ray_cast(
+                    depsgraph=self.view_layer.depsgraph,
+                    origin=origin,
+                    direction=mathutils.Vector(direction / distance),
+                    distance=distance
+                )
+                if collided:
+                    print('Collision detected, not moving the camera.')
+                    return
+
         # Copy the camera pose
         world_from_camera = world_from_camera.copy()
 
@@ -73,7 +93,7 @@ class Simulator:
         # Set the camera pose
         self.camera.matrix_world = mathutils.Matrix(world_from_camera)
 
-    def get_camera_pose(self) -> np.ndarray:
+    def get_world_from_camera(self) -> np.ndarray:
         # Read blender camera pose
         world_from_camera = np.array(self.camera.matrix_world)
 
@@ -82,14 +102,13 @@ class Simulator:
 
         return world_from_camera
 
-    def set_relative_camera_pose(self, camera_from_next_camera: np.ndarray):
-        world_from_camera = self.get_camera_pose()
-        world_from_next_camera = world_from_camera @ camera_from_next_camera
-        self.set_camera_pose(world_from_next_camera)
+    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
+        world_from_next_camera = self.get_world_from_camera() @ camera_from_next_camera
+        self.set_world_from_camera(world_from_next_camera)
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
-        self.set_relative_camera_pose(np.array([
+        self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, distance],
@@ -102,7 +121,7 @@ class Simulator:
             angle = np.radians(angle)
 
         # Rotate camera around the y-axis
-        self.set_relative_camera_pose(np.array([
+        self.set_camera_from_next_camera(np.array([
             [np.cos(angle), 0.0, np.sin(angle), 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [-np.sin(angle), 0.0, np.cos(angle), 0.0],
