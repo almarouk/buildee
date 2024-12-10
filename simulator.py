@@ -1,4 +1,5 @@
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 
 import cv2
@@ -49,6 +50,35 @@ class Simulator:
         self.scene.render.image_settings.color_depth = '32'
         self.scene.render.image_settings.exr_codec = 'NONE'
         self.scene.render.filepath = str(self.render_path)
+
+        # Initialize point cloud geometry node
+        self.pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
+        pcl_input_node = self.pcl_node.nodes.new(type='NodeGroupInput')
+        pcl_output_node = self.pcl_node.nodes.new(type='NodeGroupOutput')
+        pcl_points_node = self.pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
+        pcl_vertices_node = self.pcl_node.nodes.new(type="GeometryNodePointsToVertices")
+        pcl_realize_node = self.pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
+        self.pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        self.pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        self.pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
+        self.pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
+        self.pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
+        self.pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+
+        # Get a point cloud representation of every object in the scene
+        self.point_clouds = OrderedDict()
+        for obj in self.scene.objects:
+            if obj.type == 'MESH':
+                obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
+                obj_modifier.node_group = self.pcl_node
+                evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+                obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
+                evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
+                obj.modifiers.remove(obj_modifier)
+                self.point_clouds[obj] = obj_vertices.reshape(-1, 3)
+
+        # Store the total number of points in the point clouds
+        self.n_points = sum(len(vertices) for vertices in self.point_clouds.values())
 
     def render(self) -> tuple[np.ndarray, np.ndarray]:
         # Render the scene
@@ -103,8 +133,30 @@ class Simulator:
         return world_from_camera
 
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
-        world_from_next_camera = self.get_world_from_camera() @ camera_from_next_camera
-        self.set_world_from_camera(world_from_next_camera)
+        self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
+
+    def get_point_cloud(self) -> np.ndarray:
+        # Store all the points in a single point cloud
+        point_cloud = np.empty((self.n_points, 3))
+
+        # Set current point cloud index
+        point_cloud_idx = 0
+
+        # Iterate over all objects and store their transformed vertices in the point cloud
+        for obj, vertices in self.point_clouds.items():
+            # Get the object pose
+            world_from_obj = np.array(obj.matrix_world)
+
+            # Transform the vertices to world coordinates
+            world_vertices = world_from_obj[:3, :3] @ vertices.T + world_from_obj[:3, 3:]
+
+            # Transform the vertices to world coordinates
+            point_cloud[point_cloud_idx:point_cloud_idx + len(vertices)] = world_vertices.T
+
+            # Update the point cloud index
+            point_cloud_idx += len(vertices)
+
+        return point_cloud
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
@@ -133,6 +185,8 @@ if __name__ == '__main__':
     # Create a simulator
     simulator = Simulator('test.blend')
 
+    simulator.get_point_cloud()
+
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
 
@@ -141,13 +195,13 @@ if __name__ == '__main__':
         key = cv2.waitKeyEx(7)
 
         if key == ord('q'):
-            simulator.rotate_camera_yaw(-4)
+            simulator.rotate_camera_yaw(-15)
         elif key == ord('d'):
-            simulator.rotate_camera_yaw(4)
+            simulator.rotate_camera_yaw(15)
         elif key == ord('z'):
-            simulator.move_camera_forward(0.3)
+            simulator.move_camera_forward(1)
         elif key == ord('s'):
-            simulator.move_camera_forward(-0.3)
+            simulator.move_camera_forward(-1)
         elif key == 27:  # escape key
             break
 
