@@ -51,34 +51,43 @@ class Simulator:
         self.scene.render.image_settings.exr_codec = 'NONE'
         self.scene.render.filepath = str(self.render_path)
 
+        # Get a point cloud representation of every object in the scene
+        self.object_point_clouds = self.setup_object_point_clouds()
+
+        # Store the total number of points in the point clouds
+        self.n_points = sum(len(vertices) for vertices in self.object_point_clouds.values())
+
+        # Get camera matrix
+        self.camera_matrix = self.get_camera_matrix()
+
+    def setup_object_point_clouds(self) -> OrderedDict[bpy.types.Object, np.ndarray]:
         # Initialize point cloud geometry node
-        self.pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
-        pcl_input_node = self.pcl_node.nodes.new(type='NodeGroupInput')
-        pcl_output_node = self.pcl_node.nodes.new(type='NodeGroupOutput')
-        pcl_points_node = self.pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
-        pcl_vertices_node = self.pcl_node.nodes.new(type="GeometryNodePointsToVertices")
-        pcl_realize_node = self.pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
-        self.pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
-        self.pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
-        self.pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
-        self.pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
-        self.pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
-        self.pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+        pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
+        pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
+        pcl_output_node = pcl_node.nodes.new(type='NodeGroupOutput')
+        pcl_points_node = pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
+        pcl_vertices_node = pcl_node.nodes.new(type="GeometryNodePointsToVertices")
+        pcl_realize_node = pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
+        pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
+        pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
+        pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
+        pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
 
         # Get a point cloud representation of every object in the scene
-        self.point_clouds = OrderedDict()
+        object_point_clouds = OrderedDict()
         for obj in self.scene.objects:
             if obj.type == 'MESH':
                 obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
-                obj_modifier.node_group = self.pcl_node
+                obj_modifier.node_group = pcl_node
                 evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
                 obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
                 evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
                 obj.modifiers.remove(obj_modifier)
-                self.point_clouds[obj] = obj_vertices.reshape(-1, 3)
+                object_point_clouds[obj] = obj_vertices.reshape(-1, 3)
 
-        # Store the total number of points in the point clouds
-        self.n_points = sum(len(vertices) for vertices in self.point_clouds.values())
+        return object_point_clouds
 
     def render(self) -> tuple[np.ndarray, np.ndarray]:
         # Render the scene
@@ -95,6 +104,19 @@ class Simulator:
         ), axis=0)
 
         return rgbd[:, :, :3], rgbd[:, :, 3]
+
+    def get_camera_matrix(self) -> np.ndarray:
+        image_width = self.scene.render.resolution_x
+        image_height = self.scene.render.resolution_y
+        fixed_size = image_height if self.camera.data.sensor_fit == 'VERTICAL' else image_width
+        f = fixed_size / np.tan(self.camera.data.angle / 2) / 2
+        cx = image_width / 2
+        cy = image_height / 2
+        return np.array([
+            [f, 0, cx],
+            [0, f, cy],
+            [0, 0, 1]
+        ])
 
     def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True):
         # Check that there is no collision between current camera and new camera pose
@@ -135,28 +157,69 @@ class Simulator:
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
         self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
-    def get_point_cloud(self) -> np.ndarray:
+    def get_point_cloud(self) -> (np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
+
+        # Set all points as visible
+        mask = np.ones(self.n_points, dtype=bool)
+
+        # Get camera center
+        origin = self.camera.location
 
         # Set current point cloud index
         point_cloud_idx = 0
 
         # Iterate over all objects and store their transformed vertices in the point cloud
-        for obj, vertices in self.point_clouds.items():
+        for obj, vertices in self.object_point_clouds.items():
             # Get the object pose
             world_from_obj = np.array(obj.matrix_world)
 
-            # Transform the vertices to world coordinates
+            # Transform the vertices to world coordinates and store them in the point cloud
             world_vertices = world_from_obj[:3, :3] @ vertices.T + world_from_obj[:3, 3:]
-
-            # Transform the vertices to world coordinates
             point_cloud[point_cloud_idx:point_cloud_idx + len(vertices)] = world_vertices.T
 
             # Update the point cloud index
             point_cloud_idx += len(vertices)
 
-        return point_cloud
+        # Get camera from world transformation
+        camera_from_world = np.linalg.inv(self.get_world_from_camera())
+
+        # Transform the point cloud to camera coordinates
+        camera_point_cloud = camera_from_world[:3, :3] @ point_cloud.T + camera_from_world[:3, 3:]
+
+        # Project the point cloud to the image plane
+        camera_point_cloud_px = self.camera_matrix @ camera_point_cloud
+        camera_point_cloud_px = camera_point_cloud_px[:2] / camera_point_cloud_px[2]
+
+        # Filter points that are outside the image plane
+        mask &= (
+            (camera_point_cloud[2] > 0) &
+            (0 <= camera_point_cloud_px[0]) & (camera_point_cloud_px[0] < self.scene.render.resolution_x) &
+            (0 <= camera_point_cloud_px[1]) & (camera_point_cloud_px[1] < self.scene.render.resolution_y)
+        )
+
+        # Check occlusion for each valid point
+        for idx in np.where(mask)[0]:
+
+            point = mathutils.Vector(point_cloud[idx])
+
+            # Compute ray direction, from the camera center to the point
+            ray_direction = point - origin
+
+            # Racyast from the camera center to the point
+            collided, collision_location, _, _, _, _ = self.scene.ray_cast(
+                depsgraph=self.view_layer.depsgraph,
+                origin=origin,
+                direction=ray_direction.normalized(),
+                distance=ray_direction.length
+            )
+
+            # Filter point if the raycast hit somewhere different from the vertice
+            if collided and ((point - collision_location).length > 0.01):
+                mask[idx] = False
+
+        return point_cloud, mask
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
