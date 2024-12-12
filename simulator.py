@@ -11,7 +11,7 @@ import numpy as np
 
 
 class Simulator:
-    def __init__(self, blend_file: str | Path):
+    def __init__(self, blend_file: str | Path, points_density: float = 1.0):
         # Load blender file
         bpy.ops.wm.open_mainfile(filepath=str(blend_file))
 
@@ -55,44 +55,56 @@ class Simulator:
         self.camera_matrix = self.get_camera_matrix()
 
         # Get a point cloud representation of every object in the scene
-        self.object_point_clouds = self.setup_object_point_clouds()
+        self.object_point_clouds = self.setup_object_point_clouds(points_density=points_density)
         # Store the total number of points in the point clouds
         self.n_points = sum(len(vertices) for vertices in self.object_point_clouds.values())
         # Setup colors for rendering the point cloud
         self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)
 
-        pcl, _ = self.get_point_cloud()
-        self.point_cloud_colors[np.abs(pcl[:, 0] - 1.0) < 1e-6] = (255, 0, 0)
-        self.point_cloud_colors[np.abs(pcl[:, 0] + 1.0) < 1e-6] = (0, 255, 0)
-        self.point_cloud_colors[np.abs(pcl[:, 1] - 1.0) < 1e-6] = (0, 0, 255)
-        self.point_cloud_colors[np.abs(pcl[:, 1] + 1.0) < 1e-6] = (255, 100, 255)
+    def get_visible_collections(self, layer_collection):
+        # Recursively get all visible collections
+        visible_collections = []
+        if layer_collection.is_visible:
+            visible_collections.append(layer_collection)
+            for child in layer_collection.children:
+                visible_collections.extend(self.get_visible_collections(child))
+        return visible_collections
 
-    def setup_object_point_clouds(self) -> OrderedDict[bpy.types.Object, np.ndarray]:
+
+    def setup_object_point_clouds(self, points_density: float) -> OrderedDict[bpy.types.Object, np.ndarray]:
         # Initialize point cloud geometry node
-        self.pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
-        pcl_input_node = self.pcl_node.nodes.new(type='NodeGroupInput')
-        pcl_output_node = self.pcl_node.nodes.new(type='NodeGroupOutput')
-        pcl_points_node = self.pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
-        pcl_vertices_node = self.pcl_node.nodes.new(type="GeometryNodePointsToVertices")
-        pcl_realize_node = self.pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
-        self.pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
-        self.pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
-        self.pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
-        self.pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
-        self.pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
-        self.pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+        pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
+        pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
+        pcl_output_node = pcl_node.nodes.new(type='NodeGroupOutput')
+        pcl_points_node = pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
+        pcl_vertices_node = pcl_node.nodes.new(type="GeometryNodePointsToVertices")
+        pcl_realize_node = pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
+        pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
+        pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
+        pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
+        pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+        pcl_points_node.inputs['Density'].default_value = points_density
+
+        # Get visible collections
+        collections = self.get_visible_collections(self.view_layer.layer_collection)
+        # Get all objects in the visible collections
+        objects = [obj for col in collections for obj in col.collection.objects if obj.type == 'MESH']
 
         # Get a point cloud representation of every object in the scene
         object_point_clouds = OrderedDict()
-        for obj in self.scene.objects:
-            if obj.type == 'MESH':
-                obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
-                obj_modifier.node_group = self.pcl_node
-                evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-                obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
-                evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
-                obj.modifiers.remove(obj_modifier)
-                object_point_clouds[obj] = obj_vertices.reshape(-1, 3)
+        progress_bar = tqdm.tqdm(total=len(objects), desc='Point clouds')
+        for obj in objects:
+            obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
+            obj_modifier.node_group = pcl_node
+            evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
+            evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
+            obj.modifiers.remove(obj_modifier)
+            object_point_clouds[obj] = obj_vertices.reshape(-1, 3)
+            progress_bar.set_postfix_str(obj.name)
+            progress_bar.update()
 
         return object_point_clouds
 
@@ -240,9 +252,6 @@ class Simulator:
 
         return point_cloud, mask
 
-    def set_points_density(self, density: float):
-        self.pcl_node.nodes['Distribute Points on Faces'].inputs['Density'].default_value = density
-
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
         self.set_camera_from_next_camera(np.array([
@@ -268,7 +277,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('test.blend')
+    simulator = Simulator('test.blend', points_density=1.0)
 
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
