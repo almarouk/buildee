@@ -51,36 +51,43 @@ class Simulator:
         self.scene.render.image_settings.exr_codec = 'NONE'
         self.scene.render.filepath = str(self.render_path)
 
-        # Get a point cloud representation of every object in the scene
-        self.object_point_clouds = self.setup_object_point_clouds()
-
-        # Store the total number of points in the point clouds
-        self.n_points = sum(len(vertices) for vertices in self.object_point_clouds.values())
-
         # Get camera matrix
         self.camera_matrix = self.get_camera_matrix()
 
+        # Get a point cloud representation of every object in the scene
+        self.object_point_clouds = self.setup_object_point_clouds()
+        # Store the total number of points in the point clouds
+        self.n_points = sum(len(vertices) for vertices in self.object_point_clouds.values())
+        # Setup colors for rendering the point cloud
+        self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)
+
+        pcl, _ = self.get_point_cloud()
+        self.point_cloud_colors[np.abs(pcl[:, 0] - 1.0) < 1e-6] = (255, 0, 0)
+        self.point_cloud_colors[np.abs(pcl[:, 0] + 1.0) < 1e-6] = (0, 255, 0)
+        self.point_cloud_colors[np.abs(pcl[:, 1] - 1.0) < 1e-6] = (0, 0, 255)
+        self.point_cloud_colors[np.abs(pcl[:, 1] + 1.0) < 1e-6] = (255, 100, 255)
+
     def setup_object_point_clouds(self) -> OrderedDict[bpy.types.Object, np.ndarray]:
         # Initialize point cloud geometry node
-        pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
-        pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
-        pcl_output_node = pcl_node.nodes.new(type='NodeGroupOutput')
-        pcl_points_node = pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
-        pcl_vertices_node = pcl_node.nodes.new(type="GeometryNodePointsToVertices")
-        pcl_realize_node = pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
-        pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
-        pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
-        pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
-        pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
-        pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
-        pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+        self.pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
+        pcl_input_node = self.pcl_node.nodes.new(type='NodeGroupInput')
+        pcl_output_node = self.pcl_node.nodes.new(type='NodeGroupOutput')
+        pcl_points_node = self.pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
+        pcl_vertices_node = self.pcl_node.nodes.new(type="GeometryNodePointsToVertices")
+        pcl_realize_node = self.pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
+        self.pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        self.pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        self.pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
+        self.pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
+        self.pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
+        self.pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
 
         # Get a point cloud representation of every object in the scene
         object_point_clouds = OrderedDict()
         for obj in self.scene.objects:
             if obj.type == 'MESH':
                 obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
-                obj_modifier.node_group = pcl_node
+                obj_modifier.node_group = self.pcl_node
                 evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
                 obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
                 evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
@@ -122,15 +129,14 @@ class Simulator:
         # Check that there is no collision between current camera and new camera pose
         if check_collisions:
             origin = self.camera.location
-            direction = world_from_camera[:3, 3] - np.array(origin)
-            distance = float(np.linalg.norm(direction))
+            direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
 
-            if distance > 1e-8:  # do not move camera if we check for collisions but the distance is too small
+            if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
                 collided, collision_location, _, _, _, _ = self.scene.ray_cast(
                     depsgraph=self.view_layer.depsgraph,
                     origin=origin,
-                    direction=mathutils.Vector(direction / distance),
-                    distance=distance
+                    direction=direction.normalized(),
+                    distance=direction.length + 1e-3  # add a small collision offset
                 )
                 if collided:
                     print('Collision detected, not moving the camera.')
@@ -157,7 +163,7 @@ class Simulator:
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
         self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
-    def get_point_cloud(self) -> (np.ndarray, np.ndarray):
+    def get_point_cloud(self, imshow: bool = False) -> (np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
 
@@ -166,6 +172,10 @@ class Simulator:
 
         # Get camera center
         origin = self.camera.location
+
+        # Get image width and height
+        image_width = self.scene.render.resolution_x
+        image_height = self.scene.render.resolution_y
 
         # Set current point cloud index
         point_cloud_idx = 0
@@ -195,8 +205,8 @@ class Simulator:
         # Filter points that are outside the image plane
         mask &= (
             (camera_point_cloud[2] > 0) &
-            (0 <= camera_point_cloud_px[0]) & (camera_point_cloud_px[0] < self.scene.render.resolution_x) &
-            (0 <= camera_point_cloud_px[1]) & (camera_point_cloud_px[1] < self.scene.render.resolution_y)
+            (0 <= camera_point_cloud_px[0]) & (camera_point_cloud_px[0] < image_width) &
+            (0 <= camera_point_cloud_px[1]) & (camera_point_cloud_px[1] < image_height)
         )
 
         # Check occlusion for each valid point
@@ -219,7 +229,19 @@ class Simulator:
             if collided and ((point - collision_location).length > 0.01):
                 mask[idx] = False
 
+        # Show the point cloud if needed
+        if imshow:
+            point_cloud_image = np.zeros((image_height, image_width, 3), dtype=np.uint8)
+            point_cloud_image[
+                np.int64(camera_point_cloud_px[1, mask]),
+                np.int64(camera_point_cloud_px[0, mask])
+            ] = self.point_cloud_colors[mask]
+            cv2.imshow(f'points', point_cloud_image)
+
         return point_cloud, mask
+
+    def set_points_density(self, density: float):
+        self.pcl_node.nodes['Distribute Points on Faces'].inputs['Density'].default_value = density
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
@@ -248,8 +270,6 @@ if __name__ == '__main__':
     # Create a simulator
     simulator = Simulator('test.blend')
 
-    simulator.get_point_cloud()
-
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
 
@@ -276,5 +296,6 @@ if __name__ == '__main__':
 
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
+        simulator.get_point_cloud(imshow=True)
 
     cv2.destroyAllWindows()
