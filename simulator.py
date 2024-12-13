@@ -55,8 +55,11 @@ class Simulator:
         # Get camera matrix
         self.camera_matrix = self.get_camera_matrix()
 
+        # Get all visible objects
+        self.objects = self.get_visible_objects()
+
         # Get a point cloud representation of every object in the scene
-        self.object_point_clouds = self.setup_object_point_clouds(points_density=points_density)
+        self.object_point_clouds = self.get_object_point_clouds(points_density=points_density)
         # Store the total number of points in the point clouds
         self.n_points = sum(len(vertices) for vertices in self.object_point_clouds.values())
         # Setup colors for rendering the point cloud
@@ -64,12 +67,12 @@ class Simulator:
         print(f'Extracted {self.n_points} points')
 
         # Get vertices and triangles for BVH tree
-        self.object_verts_polys = self.compute_vertices_polygons()
+        self.object_verts_polys = self.get_vertices_polygons()
         # Store the total number of vertices in the scene
         self.n_vertices = sum(len(vertices) for vertices, _ in self.object_verts_polys.values())
         print(f'Found {self.n_vertices} vertices')
 
-    def get_visible_collections(self, layer_collection):
+    def get_visible_collections(self, layer_collection) -> list[bpy.types.Collection]:
         # Recursively get all visible collections
         visible_collections = []
         if layer_collection.is_visible:
@@ -78,7 +81,14 @@ class Simulator:
                 visible_collections.extend(self.get_visible_collections(child))
         return visible_collections
 
-    def setup_object_point_clouds(self, points_density: float) -> OrderedDict[bpy.types.Object, np.ndarray]:
+    def get_visible_objects(self) -> list[bpy.types.Object]:
+        # Get all render-visible objects in all visible collections
+        collections = self.get_visible_collections(self.view_layer.layer_collection)
+        return [
+            obj for col in collections for obj in col.collection.objects if (obj.type == 'MESH') and not obj.hide_render
+        ]
+
+    def get_object_point_clouds(self, points_density: float) -> OrderedDict[bpy.types.Object, np.ndarray]:
         # Initialize point cloud geometry node
         pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
         pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
@@ -94,37 +104,32 @@ class Simulator:
         pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
         pcl_points_node.inputs['Density'].default_value = points_density
 
-        # Get visible collections
-        collections = self.get_visible_collections(self.view_layer.layer_collection)
-        # Get all objects in the visible collections
-        objects = [
-            obj for col in collections for obj in col.collection.objects if (obj.type == 'MESH') and ~obj.hide_render
-        ]
-
         # Get a point cloud representation of every object in the scene
         object_point_clouds = OrderedDict()
-        progress_bar = tqdm.tqdm(total=len(objects), desc='Point clouds')
-        for obj in objects:
+        progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds')
+        for obj in self.objects:
             obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
-            obj_modifier.node_group = pcl_node
+            obj_modifier.node_group = pcl_node  # apply Pointcloud modifier to object
             evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-            obj_vertices = np.empty(len(evaluated_obj.data.vertices) * 3)
-            evaluated_obj.data.vertices.foreach_get('co', obj_vertices)
+            mesh = evaluated_obj.to_mesh()  # convert to mesh to apply modifiers
+            mesh_vertices = np.empty(len(mesh.vertices) * 3)
+            mesh.vertices.foreach_get('co', mesh_vertices)
+            object_point_clouds[obj] = mesh_vertices.reshape(-1, 3)
+            evaluated_obj.to_mesh_clear()  # free temporary mesh data
             obj.modifiers.remove(obj_modifier)
-            object_point_clouds[obj] = obj_vertices.reshape(-1, 3)
             progress_bar.set_postfix_str(obj.name)
             progress_bar.update()
         progress_bar.close()
 
         return object_point_clouds
 
-    def compute_vertices_polygons(self) -> OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]]:
+    def get_vertices_polygons(self) -> OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]]:
         vertex_offset = 0
         object_verts_polys = OrderedDict()
-        progress_bar = tqdm.tqdm(total=len(self.object_point_clouds), desc='BVH')
+        progress_bar = tqdm.tqdm(total=len(self.objects), desc='BVH')
 
         # Iterate over all objects and store their vertices and triangles for BVH tree
-        for obj in self.object_point_clouds:
+        for obj in self.objects:
             evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
             mesh = evaluated_obj.to_mesh()  # convert to mesh to apply modifiers
             mesh_vertices = np.empty(len(mesh.vertices) * 3)
@@ -206,7 +211,7 @@ class Simulator:
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
         self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
-    def get_bvh_tree(self) -> mathutils.bvhtree.BVHTree:
+    def compute_bvh_tree(self) -> mathutils.bvhtree.BVHTree:
         # Initialize vertices and triangles
         vertices, polygons = [], []
 
@@ -277,7 +282,7 @@ class Simulator:
         current_time = time.time()
 
         # Get BVH tree
-        bvh = self.get_bvh_tree()
+        bvh = self.compute_bvh_tree()
 
         bvh_time = time.time() - current_time
         current_time = time.time()
