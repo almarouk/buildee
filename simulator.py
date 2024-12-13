@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
+from blender_utils import is_animated
+
 
 class Simulator:
     def __init__(self, blend_file: str | Path, points_density: float = 1.0):
@@ -71,6 +73,11 @@ class Simulator:
         # Store the total number of vertices in the scene
         self.n_vertices = sum(len(vertices) for vertices, _ in self.object_verts_polys.values())
         print(f'Found {self.n_vertices} vertices')
+
+        # Get if the scene is static
+        self.static_scene = all(not is_animated(obj) for obj in self.objects)
+        # Compute BVH tree if the scene is static
+        self.bvh = self.compute_bvh_tree() if self.static_scene else None
 
     def get_visible_collections(self, layer_collection) -> list[bpy.types.Collection]:
         # Recursively get all visible collections
@@ -282,7 +289,7 @@ class Simulator:
         current_time = time.time()
 
         # Get BVH tree
-        bvh = self.compute_bvh_tree()
+        bvh = self.bvh if self.static_scene else self.compute_bvh_tree()
 
         bvh_time = time.time() - current_time
         current_time = time.time()
@@ -348,7 +355,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('construction.blend', points_density=10.0)
+    simulator = Simulator('liberty.blend', points_density=10.0)
 
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
