@@ -97,7 +97,9 @@ class Simulator:
         # Get visible collections
         collections = self.get_visible_collections(self.view_layer.layer_collection)
         # Get all objects in the visible collections
-        objects = [obj for col in collections for obj in col.collection.objects if obj.type == 'MESH']
+        objects = [
+            obj for col in collections for obj in col.collection.objects if (obj.type == 'MESH') and ~obj.hide_render
+        ]
 
         # Get a point cloud representation of every object in the scene
         object_point_clouds = OrderedDict()
@@ -119,6 +121,7 @@ class Simulator:
     def compute_vertices_polygons(self) -> OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]]:
         vertex_offset = 0
         object_verts_polys = OrderedDict()
+        progress_bar = tqdm.tqdm(total=len(self.object_point_clouds), desc='BVH')
 
         # Iterate over all objects and store their vertices and triangles for BVH tree
         for obj in self.object_point_clouds:
@@ -130,6 +133,9 @@ class Simulator:
             vertex_offset += len(mesh.vertices)
             object_verts_polys[obj] = (mesh_vertices.reshape(-1, 3), polygons)
             evaluated_obj.to_mesh_clear()  # free temporary mesh data
+            progress_bar.set_postfix_str(obj.name)
+            progress_bar.update()
+        progress_bar.close()
 
         return object_verts_polys
 
@@ -285,18 +291,18 @@ class Simulator:
             ray_direction = point - origin
 
             # Racyast from the camera center to the point
-            collided, collision_location, _, _ = bvh.ray_cast(
+            collision_location, _, _, _ = bvh.ray_cast(
                 origin,
                 ray_direction.normalized(),
                 ray_direction.length
             )
 
             # Filter point if the raycast hit somewhere different from the vertice
-            if collided and ((point - collision_location).length > 0.01):
+            if (collision_location is not None) and ((point - collision_location).length > 0.01):
                 mask[idx] = False
 
         raycast_time = time.time() - current_time
-        # tqdm.tqdm.write(f'transform: {transform_time:.6f}s, filter: {filter_time:.6f}s, raycast: {raycast_time:.6f}s')
+        tqdm.tqdm.write(f'transform: {transform_time:.6f}s, filter: {filter_time:.6f}s, bvh: {bvh_time:.6f}s, raycast: {raycast_time:.6f}s')
 
         # Show the point cloud if needed
         if imshow:
@@ -337,7 +343,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('test.blend', points_density=1000.0)
+    simulator = Simulator('construction.blend', points_density=10.0)
 
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
