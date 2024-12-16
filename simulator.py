@@ -214,7 +214,7 @@ class Simulator:
             [0, 0, 1]
         ])
 
-    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True):
+    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
         # Check that there is no collision between current camera and new camera pose
         if check_collisions:
             origin = self.camera.location
@@ -229,7 +229,7 @@ class Simulator:
                 )
                 if collided:
                     print('Collision detected, not moving the camera.')
-                    return
+                    return True  # there was a collision
 
         # Copy the camera pose
         world_from_camera = world_from_camera.copy()
@@ -239,6 +239,9 @@ class Simulator:
 
         # Set the camera pose
         self.camera.matrix_world = mathutils.Matrix(world_from_camera)
+
+        # There was no collision
+        return False
 
     def get_world_from_camera(self) -> np.ndarray:
         # Read blender camera pose
@@ -362,10 +365,10 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('construction.blend', points_density=10.0)
+    simulator = Simulator('liberty.blend', points_density=100.0)
 
     depth_color_map = plt.get_cmap('magma')
-    max_depth_distance_display = 10.0
+    max_depth_distance_display = 25.0
 
     for _ in tqdm.tqdm(range(999999999)):
 
