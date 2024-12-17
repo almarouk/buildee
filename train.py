@@ -1,9 +1,10 @@
-import numpy as np
-from simulator import Simulator
-import gymnasium as gym
 import cv2
+import gymnasium as gym
+import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common import logger
+
+from simulator import Simulator
 
 
 class SimulatorEnv(gym.Env):

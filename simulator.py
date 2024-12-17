@@ -21,11 +21,16 @@ class Simulator:
             filter_object_names: list[str] = ('CameraBounds',),
             verbose: bool = False
     ):
-        # Load blender file
-        bpy.ops.wm.open_mainfile(filepath=str(blend_file))
-
         # Set verbose mode
         self.verbose = verbose
+
+        # Load blender file
+        if not self.verbose:
+            devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
+            bpy.ops.wm.open_mainfile(filepath=str(blend_file))
+            restore_output(devnull, original_stdout, original_stderr)  # restore print output
+        else:
+            bpy.ops.wm.open_mainfile(filepath=str(blend_file))
 
         # Get the current scene
         self.scene = bpy.context.scene
@@ -389,7 +394,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('liberty.blend', points_density=100.0)
+    simulator = Simulator('liberty.blend', points_density=100.0, verbose=True)
 
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
