@@ -33,7 +33,8 @@ def get_visible_objects(collection: bpy.types.Collection) -> list[bpy.types.Obje
     # Get all render-visible objects in all visible collections
     collections = get_visible_collections(collection)
     return [
-        obj for col in collections for obj in col.collection.objects if (obj.type == 'MESH') and not obj.hide_render
+        obj for col in collections for obj in col.collection.objects
+        if (obj.type == 'MESH') and (not obj.hide_render) and (obj.name != 'CameraBounds')
     ]
 
 
