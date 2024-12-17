@@ -79,8 +79,11 @@ class Simulator:
         self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
         print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
 
-        # Compute the static BVH tree
+        # Compute the static BVH tree for fast point cloud occlusion checking
         self.static_bvh = compute_bvh_tree(self.static_verts_polys)
+
+        # Store a mask of the observed 3d points
+        self.observed_points_mask = np.zeros(self.n_points, dtype=bool)
 
     def get_object_point_clouds(
             self,
@@ -258,7 +261,7 @@ class Simulator:
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
         return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
-    def get_point_cloud(self, imshow: bool = False) -> (np.ndarray, np.ndarray):
+    def get_point_cloud(self, update_mask: bool = True, imshow: bool = False) -> (np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
         point_cloud_idx = 0
@@ -328,6 +331,10 @@ class Simulator:
                 # Filter point if the raycast hit somewhere different from the vertice
                 if (collision_location is not None) and ((point - collision_location).length > 0.01):
                     mask[idx] = False
+
+        # Update the observed points mask
+        if update_mask:
+            self.observed_points_mask |= mask
 
         # Show the point cloud if needed
         if imshow:
