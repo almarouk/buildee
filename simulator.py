@@ -1,5 +1,7 @@
+import os
 import tempfile
 from collections import OrderedDict
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 import bpy
@@ -187,7 +189,9 @@ class Simulator:
 
     def render(self) -> tuple[np.ndarray, np.ndarray]:
         # Render the scene
-        bpy.ops.render.render(write_still=True)
+        with open(os.devnull, 'w') as devnull:
+            with redirect_stdout(devnull), redirect_stderr(devnull):
+                bpy.ops.render.render(write_still=True)
 
         # Load the image
         render = bpy.data.images.load(str(self.render_path))
@@ -252,8 +256,8 @@ class Simulator:
 
         return world_from_camera
 
-    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray):
-        self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
+    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
+        return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
     def get_point_cloud(self, imshow: bool = False) -> (np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
