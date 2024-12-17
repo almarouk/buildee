@@ -18,10 +18,14 @@ class Simulator:
             self,
             blend_file: str | Path,
             points_density: float = 1.0,
-            filter_object_names: list[str] = ('CameraBounds',)
+            filter_object_names: list[str] = ('CameraBounds',),
+            verbose: bool = False
     ):
         # Load blender file
         bpy.ops.wm.open_mainfile(filepath=str(blend_file))
+
+        # Set verbose mode
+        self.verbose = verbose
 
         # Get the current scene
         self.scene = bpy.context.scene
@@ -54,7 +58,8 @@ class Simulator:
         self.n_static_vertices = sum(len(vertices) for vertices, _ in self.static_verts_polys.values())
         self.n_dynamic_vertices = sum(len(vertices) for vertices, _ in self.dynamic_verts_polys.values())
         self.n_vertices = self.n_static_vertices + self.n_dynamic_vertices
-        print(f'Found {self.n_static_vertices} static vertices and {self.n_dynamic_vertices} dynamic vertices')
+        if self.verbose:
+            print(f'Found {self.n_static_vertices} static vertices and {self.n_dynamic_vertices} dynamic vertices')
 
         # Get a point cloud representation of every static and dynamic object in the scene
         self.static_point_clouds, self.dynamic_point_clouds = self.init_object_point_clouds(
@@ -64,7 +69,8 @@ class Simulator:
         self.n_dynamic_points = sum(len(vertices) for vertices in self.dynamic_point_clouds.values())
         self.n_points = self.n_static_points + self.n_dynamic_points
         self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
-        print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
+        if self.verbose:
+            print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
 
         # Compute the static BVH tree for fast point cloud occlusion checking
         self.static_bvh = compute_bvh_tree(self.static_verts_polys)
@@ -99,7 +105,7 @@ class Simulator:
     ]:
         # Get vertices and polygons indices for every object in the scene
         static_verts_polys, dynamic_verts_polys = OrderedDict(), OrderedDict()
-        progress_bar = tqdm.tqdm(total=len(self.objects), desc='BVH')
+        progress_bar = tqdm.tqdm(total=len(self.objects), desc='BVH', disable=not self.verbose)
 
         # Initialize static and dynamic vertex offset
         static_vertex_offset, dynamic_vertex_offset = 0, 0
@@ -161,7 +167,7 @@ class Simulator:
         # Static point clouds are expressed in world coordinates
         # Dynamic point clouds are expressed in object coordinates
         static_point_clouds, dynamic_point_clouds = OrderedDict(), OrderedDict()
-        progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds')
+        progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds', disable=not self.verbose)
 
         for obj, dynamic in self.objects.items():
 
@@ -336,7 +342,8 @@ class Simulator:
                     distance=direction.length + 1e-3  # add a small collision offset
                 )
                 if collided:
-                    print('Collision detected, not moving the camera.')
+                    if self.verbose:
+                        print('Collision detected, not moving the camera.')
                     return True  # there was a collision
 
         # Copy the camera pose
