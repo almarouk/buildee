@@ -14,7 +14,12 @@ from os_utils import redirect_output_to_null, restore_output
 
 
 class Simulator:
-    def __init__(self, blend_file: str | Path, points_density: float = 1.0):
+    def __init__(
+            self,
+            blend_file: str | Path,
+            points_density: float = 1.0,
+            filter_object_names: list[str] = ('CameraBounds',)
+    ):
         # Load blender file
         bpy.ops.wm.open_mainfile(filepath=str(blend_file))
 
@@ -32,6 +37,40 @@ class Simulator:
 
         # Get rendered image path
         self.render_path = temp_dir / 'render.exr'
+
+        # Get camera matrix
+        self.camera_matrix = self.get_camera_matrix()
+
+        # Get all visible objects
+        self.objects = OrderedDict([
+            (obj, is_animated(obj)) for obj in get_visible_objects(
+                self.view_layer.layer_collection,
+                filter_names=filter_object_names
+            )
+        ])
+
+        # Get all vertices and polygons for BVH tree for fast point cloud occlusion checking
+        self.static_verts_polys, self.dynamic_verts_polys = self.init_vertices_polygons()
+        self.n_static_vertices = sum(len(vertices) for vertices, _ in self.static_verts_polys.values())
+        self.n_dynamic_vertices = sum(len(vertices) for vertices, _ in self.dynamic_verts_polys.values())
+        self.n_vertices = self.n_static_vertices + self.n_dynamic_vertices
+        print(f'Found {self.n_static_vertices} static vertices and {self.n_dynamic_vertices} dynamic vertices')
+
+        # Get a point cloud representation of every static and dynamic object in the scene
+        self.static_point_clouds, self.dynamic_point_clouds = self.init_object_point_clouds(
+            points_density=points_density
+        )
+        self.n_static_points = sum(len(vertices) for vertices in self.static_point_clouds.values())
+        self.n_dynamic_points = sum(len(vertices) for vertices in self.dynamic_point_clouds.values())
+        self.n_points = self.n_static_points + self.n_dynamic_points
+        self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
+        print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
+
+        # Compute the static BVH tree for fast point cloud occlusion checking
+        self.static_bvh = compute_bvh_tree(self.static_verts_polys)
+
+        # Store a mask of the observed 3d points
+        self.observed_points_mask = np.zeros(self.n_points, dtype=bool)
 
         # Render the depth in alpha channel
         self.scene.use_nodes = True
@@ -54,96 +93,7 @@ class Simulator:
         self.scene.render.image_settings.exr_codec = 'NONE'
         self.scene.render.filepath = str(self.render_path)
 
-        # Get camera matrix
-        self.camera_matrix = self.get_camera_matrix()
-
-        # Get all visible objects
-        self.objects = get_visible_objects(self.view_layer.layer_collection)
-        # Store if the object is animated
-        self.object_dynamic = [is_animated(obj) for obj in self.objects]
-
-        # Get vertices and polygons for BVH tree
-        self.static_verts_polys, self.dynamic_verts_polys = self.get_vertices_polygons()
-        self.n_static_vertices = sum(len(vertices) for vertices, _ in self.static_verts_polys.values())
-        self.n_dynamic_vertices = sum(len(vertices) for vertices, _ in self.dynamic_verts_polys.values())
-        self.n_vertices = self.n_static_vertices + self.n_dynamic_vertices
-        print(f'Found {self.n_static_vertices} static vertices and {self.n_dynamic_vertices} dynamic vertices')
-
-        # Get a point cloud representation of every static and dynamic object in the scene
-        self.static_point_clouds, self.dynamic_point_clouds = self.get_object_point_clouds(
-            points_density=points_density
-        )
-        self.n_static_points = sum(len(vertices) for vertices in self.static_point_clouds.values())
-        self.n_dynamic_points = sum(len(vertices) for vertices in self.dynamic_point_clouds.values())
-        self.n_points = self.n_static_points + self.n_dynamic_points
-        self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
-        print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
-
-        # Compute the static BVH tree for fast point cloud occlusion checking
-        self.static_bvh = compute_bvh_tree(self.static_verts_polys)
-
-        # Store a mask of the observed 3d points
-        self.observed_points_mask = np.zeros(self.n_points, dtype=bool)
-
-    def get_object_point_clouds(
-            self,
-            points_density: float
-    ) -> tuple[OrderedDict[bpy.types.Object, np.ndarray], OrderedDict[bpy.types.Object, np.ndarray]]:
-        # Initialize point cloud geometry node
-        pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
-        pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
-        pcl_output_node = pcl_node.nodes.new(type='NodeGroupOutput')
-        pcl_points_node = pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
-        pcl_vertices_node = pcl_node.nodes.new(type="GeometryNodePointsToVertices")
-        pcl_realize_node = pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
-        pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
-        pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
-        pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
-        pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
-        pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
-        pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
-        pcl_points_node.inputs['Density'].default_value = points_density
-
-        # Get a point cloud representation of every object in the scene
-        # Static point clouds are expressed in world coordinates
-        # Dynamic point clouds are expressed in object coordinates
-        static_point_clouds, dynamic_point_clouds = OrderedDict(), OrderedDict()
-        progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds')
-
-        for obj, dynamic in zip(self.objects, self.object_dynamic):
-
-            # Apply Pointcloud modifier to object
-            obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
-            obj_modifier.node_group = pcl_node
-
-            # Convert to mesh to apply modifiers
-            evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-            mesh = evaluated_obj.to_mesh()
-
-            # Get vertices in object coordinates
-            mesh_vertices = np.empty(len(mesh.vertices) * 3)
-            mesh.vertices.foreach_get('co', mesh_vertices)
-            mesh_vertices = mesh_vertices.reshape(-1, 3)
-
-            if dynamic:  # store dynamic point clouds in object coordinates
-                dynamic_point_clouds[obj] = mesh_vertices
-            else:  # store static point clouds in world coordinates
-                world_from_obj = np.array(obj.matrix_world)
-                static_point_clouds[obj] = (world_from_obj[:3, :3] @ mesh_vertices.T + world_from_obj[:3, 3:]).T
-
-            # Clear memory and restore object
-            evaluated_obj.to_mesh_clear()
-            obj.modifiers.remove(obj_modifier)
-
-            # Update progress bar
-            progress_bar.set_postfix_str(obj.name)
-            progress_bar.update()
-
-        progress_bar.close()
-
-        return static_point_clouds, dynamic_point_clouds
-
-    def get_vertices_polygons(self) -> tuple[
+    def init_vertices_polygons(self) -> tuple[
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]],
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]]
     ]:
@@ -154,7 +104,7 @@ class Simulator:
         # Initialize static and dynamic vertex offset
         static_vertex_offset, dynamic_vertex_offset = 0, 0
 
-        for obj, dynamic in zip(self.objects, self.object_dynamic):
+        for obj, dynamic in self.objects.items():
 
             # Convert to mesh to apply modifiers
             evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
@@ -189,6 +139,63 @@ class Simulator:
 
         return static_verts_polys, dynamic_verts_polys
 
+    def init_object_point_clouds(
+            self, points_density: float
+    ) -> tuple[OrderedDict[bpy.types.Object, np.ndarray], OrderedDict[bpy.types.Object, np.ndarray]]:
+        # Initialize point cloud geometry node
+        pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
+        pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
+        pcl_output_node = pcl_node.nodes.new(type='NodeGroupOutput')
+        pcl_points_node = pcl_node.nodes.new(type="GeometryNodeDistributePointsOnFaces")
+        pcl_vertices_node = pcl_node.nodes.new(type="GeometryNodePointsToVertices")
+        pcl_realize_node = pcl_node.nodes.new(type="GeometryNodeRealizeInstances")
+        pcl_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        pcl_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        pcl_node.links.new(pcl_input_node.outputs["Geometry"], pcl_points_node.inputs["Mesh"])
+        pcl_node.links.new(pcl_points_node.outputs["Points"], pcl_vertices_node.inputs["Points"])
+        pcl_node.links.new(pcl_vertices_node.outputs["Mesh"], pcl_realize_node.inputs["Geometry"])
+        pcl_node.links.new(pcl_realize_node.outputs["Geometry"], pcl_output_node.inputs["Geometry"])
+        pcl_points_node.inputs['Density'].default_value = points_density
+
+        # Get a point cloud representation of every object in the scene
+        # Static point clouds are expressed in world coordinates
+        # Dynamic point clouds are expressed in object coordinates
+        static_point_clouds, dynamic_point_clouds = OrderedDict(), OrderedDict()
+        progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds')
+
+        for obj, dynamic in self.objects.items():
+
+            # Apply Pointcloud modifier to object
+            obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
+            obj_modifier.node_group = pcl_node
+
+            # Convert to mesh to apply modifiers
+            evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            mesh = evaluated_obj.to_mesh()
+
+            # Get vertices in object coordinates
+            mesh_vertices = np.empty(len(mesh.vertices) * 3)
+            mesh.vertices.foreach_get('co', mesh_vertices)
+            mesh_vertices = mesh_vertices.reshape(-1, 3)
+
+            if dynamic:  # store dynamic point clouds in object coordinates
+                dynamic_point_clouds[obj] = mesh_vertices
+            else:  # store static point clouds in world coordinates
+                world_from_obj = np.array(obj.matrix_world)
+                static_point_clouds[obj] = (world_from_obj[:3, :3] @ mesh_vertices.T + world_from_obj[:3, 3:]).T
+
+            # Clear memory and restore object
+            evaluated_obj.to_mesh_clear()
+            obj.modifiers.remove(obj_modifier)
+
+            # Update progress bar
+            progress_bar.set_postfix_str(obj.name)
+            progress_bar.update()
+
+        progress_bar.close()
+
+        return static_point_clouds, dynamic_point_clouds
+
     def render(self) -> tuple[np.ndarray, np.ndarray]:
         # Mute blender and render the scene
         devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
@@ -220,35 +227,6 @@ class Simulator:
             [0, 0, 1]
         ])
 
-    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
-        # Check that there is no collision between current camera and new camera pose
-        if check_collisions:
-            origin = self.camera.location
-            direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
-
-            if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
-                collided, collision_location, _, _, _, _ = self.scene.ray_cast(
-                    depsgraph=self.view_layer.depsgraph,
-                    origin=origin,
-                    direction=direction.normalized(),
-                    distance=direction.length + 1e-3  # add a small collision offset
-                )
-                if collided:
-                    print('Collision detected, not moving the camera.')
-                    return True  # there was a collision
-
-        # Copy the camera pose
-        world_from_camera = world_from_camera.copy()
-
-        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
-        world_from_camera[:3, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
-
-        # Set the camera pose
-        self.camera.matrix_world = mathutils.Matrix(world_from_camera)
-
-        # There was no collision
-        return False
-
     def get_world_from_camera(self) -> np.ndarray:
         # Read blender camera pose
         world_from_camera = np.array(self.camera.matrix_world)
@@ -258,16 +236,13 @@ class Simulator:
 
         return world_from_camera
 
-    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
-        return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
-
     def get_point_cloud(self, update_mask: bool = True, imshow: bool = False) -> (np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
         point_cloud_idx = 0
 
         # Iterate over all objects and store their transformed vertices in the point cloud
-        for obj, dynamic in zip(self.objects, self.object_dynamic):
+        for obj, dynamic in self.objects.items():
 
             if dynamic:  # only transform points of dynamic objects
                 points = self.dynamic_point_clouds[obj]
@@ -347,8 +322,37 @@ class Simulator:
 
         return point_cloud, mask
 
-    def step_frame(self):
-        self.scene.frame_set(self.scene.frame_current + 1)
+    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
+        # Check that there is no collision between current camera and new camera pose
+        if check_collisions:
+            origin = self.camera.location
+            direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
+
+            if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
+                collided, collision_location, _, _, _, _ = self.scene.ray_cast(
+                    depsgraph=self.view_layer.depsgraph,
+                    origin=origin,
+                    direction=direction.normalized(),
+                    distance=direction.length + 1e-3  # add a small collision offset
+                )
+                if collided:
+                    print('Collision detected, not moving the camera.')
+                    return True  # there was a collision
+
+        # Copy the camera pose
+        world_from_camera = world_from_camera.copy()
+
+        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
+        world_from_camera[:3, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
+
+        # Set the camera pose
+        self.camera.matrix_world = mathutils.Matrix(world_from_camera)
+
+        # There was no collision
+        return False
+
+    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
+        return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
@@ -372,13 +376,16 @@ class Simulator:
             [0.0, 0.0, 0.0, 1.0]
         ]))
 
+    def step_frame(self):
+        self.scene.frame_set(self.scene.frame_current + 1)
+
 
 if __name__ == '__main__':
     # Create a simulator
     simulator = Simulator('liberty.blend', points_density=100.0)
 
     depth_color_map = plt.get_cmap('magma')
-    max_depth_distance_display = 25.0
+    max_depth_distance_display = 10.0
 
     for _ in tqdm.tqdm(range(999999999)):
 
@@ -403,7 +410,7 @@ if __name__ == '__main__':
 
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
-        # simulator.get_point_cloud(imshow=True)
+        simulator.get_point_cloud(imshow=True)
         # simulator.step_frame()
 
     cv2.destroyAllWindows()
