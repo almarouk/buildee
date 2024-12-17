@@ -1,7 +1,5 @@
-import os
 import tempfile
 from collections import OrderedDict
-from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 import bpy
@@ -12,6 +10,7 @@ import numpy as np
 import tqdm
 
 from blender_utils import is_animated, get_visible_objects, compute_bvh_tree
+from os_utils import redirect_output_to_null, restore_output
 
 
 class Simulator:
@@ -188,10 +187,10 @@ class Simulator:
         return static_verts_polys, dynamic_verts_polys
 
     def render(self) -> tuple[np.ndarray, np.ndarray]:
-        # Render the scene
-        with open(os.devnull, 'w') as devnull:
-            with redirect_stdout(devnull), redirect_stderr(devnull):
-                bpy.ops.render.render(write_still=True)
+        # Mute blender and render the scene
+        devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
+        bpy.ops.render.render(write_still=True)  # render the scene
+        restore_output(devnull, original_stdout, original_stderr)  # restore print output
 
         # Load the image
         render = bpy.data.images.load(str(self.render_path))
@@ -389,15 +388,15 @@ if __name__ == '__main__':
         elif key == 27:  # escape key
             break
 
-        # rgb, depth = simulator.render()
-        #
-        # depth = depth_color_map(
-        #     depth.clip(0, max_depth_distance_display) / max_depth_distance_display
-        # )
-        #
-        # cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
-        # cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
-        simulator.get_point_cloud(imshow=True)
-        simulator.step_frame()
+        rgb, depth = simulator.render()
+
+        depth = depth_color_map(
+            depth.clip(0, max_depth_distance_display) / max_depth_distance_display
+        )
+
+        cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
+        cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
+        # simulator.get_point_cloud(imshow=True)
+        # simulator.step_frame()
 
     cv2.destroyAllWindows()
