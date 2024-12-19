@@ -3,6 +3,7 @@ import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common import logger
+from model import TimeSformerExtractor
 
 from simulator import Simulator
 
@@ -20,7 +21,7 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Define image observation space
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 256, 256), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
 
         # Define action space: xyz and yaw
         self.action_space = gym.spaces.Box(
@@ -87,11 +88,17 @@ class SimulatorEnv(gym.Env):
 if __name__ == "__main__":
     env = SimulatorEnv(blend_file='liberty.blend')
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
+
+    policy_kwargs = {
+        'features_extractor_class': TimeSformerExtractor,
+        'features_extractor_kwargs': {'features_dim': 256},
+    }
     model = PPO(
-        "CnnPolicy",  # Use a CNN-based policy for image-based observations
+        'CnnPolicy',
         env,
+        policy_kwargs=policy_kwargs,
         verbose=1
     )
     model.set_logger(logger)
-    model.learn(total_timesteps=550000)
+    model.learn(total_timesteps=100000)
     model.save('checkpoint.pt')
