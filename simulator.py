@@ -442,6 +442,24 @@ class Simulator:
             [0.0, 0.0, 0.0, 1.0]
         ]))
 
+    def move_camera_right(self, distance: float):
+        # Move camera along the x-axis
+        self.set_camera_from_next_camera(np.array([
+            [1.0, 0.0, 0.0, distance],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
+    def move_camera_down(self, distance: float):
+        # Move camera along the y-axis
+        self.set_camera_from_next_camera(np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, distance],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
     def rotate_camera_yaw(self, angle: float, degrees: bool = True):
         # Convert angle to radians if needed
         if degrees:
@@ -471,13 +489,21 @@ if __name__ == '__main__':
         key = cv2.waitKeyEx(7)
 
         if key == ord('q'):
-            simulator.rotate_camera_yaw(-15)
+            simulator.move_camera_right(-1)
         elif key == ord('d'):
-            simulator.rotate_camera_yaw(15)
+            simulator.move_camera_right(1)
         elif key == ord('z'):
             simulator.move_camera_forward(1)
         elif key == ord('s'):
             simulator.move_camera_forward(-1)
+        elif key == 32:
+            simulator.move_camera_down(-1)
+        elif key == ord('c'):
+            simulator.move_camera_down(1)
+        elif key == ord('a'):
+            simulator.rotate_camera_yaw(-22.5, degrees=True)
+        elif key == ord('e'):
+            simulator.rotate_camera_yaw(22.5, degrees=True)
         elif key == 27:  # escape key
             break
 
@@ -490,6 +516,9 @@ if __name__ == '__main__':
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
         simulator.get_point_cloud(imshow=True)
+
+        tqdm.tqdm.write(str(simulator.observed_points_mask.mean()))
+
         # simulator.step_frame()
 
     cv2.destroyAllWindows()

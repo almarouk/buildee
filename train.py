@@ -24,10 +24,7 @@ class SimulatorEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
 
         # Define action space: xyz and yaw
-        self.action_space = gym.spaces.Box(
-            low=np.array([-1.0, -1.0, -1.0, -0.5], dtype=np.float32),
-            high=np.array([1.0, 1.0, 1.0, 0.5], dtype=np.float32),
-        )
+        self.action_space = gym.spaces.Discrete(8)
 
         # Initialize simulator
         self.simulator = Simulator(self.blend_file, points_density=100.0)
@@ -37,13 +34,13 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Set initial camera pose
-        # self.simulator.set_world_from_camera(np.array([
-        #     [1.0, 0.0, 0.0, 0.0],
-        #     [0.0, 0.0, 1.0, -6.0],
-        #     [0.0, -1.0, 0.0, 4.5],
-        #     [0.0, 0.0, 0.0, 1.0]
-        # ]), check_collisions=False)
-        self.simulator.respawn_camera()
+        self.simulator.set_world_from_camera(np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, -6.0],
+            [0.0, -1.0, 0.0, 4.5],
+            [0.0, 0.0, 0.0, 1.0]
+        ]), check_collisions=False)
+        # self.simulator.respawn_camera()
 
         # Reset observed points
         self.simulator.observed_points_mask[:] = False
@@ -63,13 +60,25 @@ class SimulatorEnv(gym.Env):
         self.current_step += 1
 
         # Apply action to the simulator
-        x, y, z, yaw = action
-        collided = self.simulator.set_camera_from_next_camera(np.array([
-            [np.cos(yaw), 0.0, np.sin(yaw), x],
-            [0.0, 1.0, 0.0, y],
-            [-np.sin(yaw), 0.0, np.cos(yaw), z],
-            [0.0, 0.0, 0.0, 1.0]
-        ]))
+        match action:
+            case 0:
+                collided = self.simulator.move_camera_forward(1)
+            case 1:
+                collided = self.simulator.move_camera_forward(-1)
+            case 2:
+                collided = self.simulator.move_camera_down(1)
+            case 3:
+                collided = self.simulator.move_camera_down(-1)
+            case 4:
+                collided = self.simulator.move_camera_right(1)
+            case 5:
+                collided = self.simulator.move_camera_right(-1)
+            case 6:
+                collided = self.simulator.rotate_camera_yaw(22.5, degrees=True)
+            case 7:
+                collided = self.simulator.rotate_camera_yaw(-22.5, degrees=True)
+            case _:
+                raise ValueError(f'Invalid action: {action}')
 
         # Get observation
         image = self.render_image()
