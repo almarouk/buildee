@@ -433,40 +433,40 @@ class Simulator:
         # Randomly rotate the camera around the z-axis
         self.rotate_camera_yaw(np.random.uniform(0, 2 * np.pi), degrees=False)
 
-    def move_camera_forward(self, distance: float):
+    def move_camera_forward(self, distance: float) -> bool:
         # Move camera along the z-axis
-        self.set_camera_from_next_camera(np.array([
+        return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, distance],
             [0.0, 0.0, 0.0, 1.0]
         ]))
 
-    def move_camera_right(self, distance: float):
+    def move_camera_right(self, distance: float) -> bool:
         # Move camera along the x-axis
-        self.set_camera_from_next_camera(np.array([
+        return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, distance],
             [0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 1.0]
         ]))
 
-    def move_camera_down(self, distance: float):
+    def move_camera_down(self, distance: float) -> bool:
         # Move camera along the y-axis
-        self.set_camera_from_next_camera(np.array([
+        return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, distance],
             [0.0, 0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 1.0]
         ]))
 
-    def rotate_camera_yaw(self, angle: float, degrees: bool = True):
+    def rotate_camera_yaw(self, angle: float, degrees: bool = True) -> bool:
         # Convert angle to radians if needed
         if degrees:
             angle = np.radians(angle)
 
         # Rotate camera around the y-axis
-        self.set_camera_from_next_camera(np.array([
+        return self.set_camera_from_next_camera(np.array([
             [np.cos(angle), 0.0, np.sin(angle), 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [-np.sin(angle), 0.0, np.cos(angle), 0.0],
@@ -516,8 +516,6 @@ if __name__ == '__main__':
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
         simulator.get_point_cloud(imshow=True)
-
-        tqdm.tqdm.write(str(simulator.observed_points_mask.mean()))
 
         # simulator.step_frame()
 

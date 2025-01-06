@@ -1,15 +1,32 @@
+import os.path
+
 import cv2
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common import logger
-from model import TimeSformerExtractor
+from stable_baselines3.common.callbacks import BaseCallback
 
 from simulator import Simulator
 
 
+class CheckpointCallback(BaseCallback):
+    """Custom callback for saving model checkpoints during training."""
+    def __init__(self, save_freq, save_path, verbose=0):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+
+    def _on_step(self):
+        if self.n_calls % self.save_freq == 0:
+            self.model.save(self.save_path)
+            if self.verbose > 0:
+                print(f'Iter {self.n_calls}: saved model weights')
+        return True
+
+
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_file: str, max_steps: int = 20):
+    def __init__(self, blend_file: str, max_steps: int = 50):
         super().__init__()
         self.blend_file = blend_file
 
@@ -109,19 +126,21 @@ class SimulatorEnv(gym.Env):
 
 
 if __name__ == "__main__":
+    # Setup environment, logger, and checkpointer
     env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend')
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
+    checkpointer = CheckpointCallback(save_freq=10000, save_path='checkpoint', verbose=1)
+    
+    # Load or create model
+    if os.path.exists('checkpoint.zip'):
+        model = PPO.load('checkpoint', env=env, verbose=1)
+    else:
+        model = PPO(
+            'CnnPolicy',
+            env,
+            verbose=1
+        )
 
-    policy_kwargs = {
-        'features_extractor_class': TimeSformerExtractor,
-        'features_extractor_kwargs': {'features_dim': 256},
-    }
-    model = PPO(
-        'CnnPolicy',
-        env,
-        # policy_kwargs=policy_kwargs,
-        verbose=1
-    )
+    # Train model
     model.set_logger(logger)
-    model.learn(total_timesteps=100000)
-    model.save('checkpoint.pt')
+    model.learn(total_timesteps=1000000, callback=checkpointer)
