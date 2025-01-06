@@ -394,7 +394,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('pantheon.blend', points_density=100.0, verbose=True)
+    simulator = Simulator('/home/clementin/Data/blendernbv/liberty.blend', points_density=100.0, verbose=True)
 
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
