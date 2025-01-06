@@ -29,10 +29,24 @@ class SimulatorEnv(gym.Env):
             high=np.array([1.0, 1.0, 1.0, 0.5], dtype=np.float32),
         )
 
+        # Initialize simulator
+        self.simulator = Simulator(self.blend_file, points_density=100.0)
+
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
         """Reset the environment and return initial observation."""
-        self.simulator = Simulator(self.blend_file, points_density=100.0)
         self.current_step = 0
+
+        # Set initial camera pose
+        # self.simulator.set_world_from_camera(np.array([
+        #     [1.0, 0.0, 0.0, 0.0],
+        #     [0.0, 0.0, 1.0, -6.0],
+        #     [0.0, -1.0, 0.0, 4.5],
+        #     [0.0, 0.0, 0.0, 1.0]
+        # ]), check_collisions=False)
+        self.simulator.respawn_camera()
+
+        # Reset observed points
+        self.simulator.observed_points_mask[:] = False
 
         # Get initial observed points
         self.simulator.get_point_cloud(update_mask=True)
@@ -86,7 +100,7 @@ class SimulatorEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = SimulatorEnv(blend_file='liberty.blend')
+    env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend')
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
 
     policy_kwargs = {
@@ -96,7 +110,7 @@ if __name__ == "__main__":
     model = PPO(
         'CnnPolicy',
         env,
-        policy_kwargs=policy_kwargs,
+        # policy_kwargs=policy_kwargs,
         verbose=1
     )
     model.set_logger(logger)

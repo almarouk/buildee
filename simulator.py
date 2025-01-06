@@ -18,7 +18,7 @@ class Simulator:
             self,
             blend_file: str | Path,
             points_density: float = 1.0,
-            filter_object_names: list[str] = ('CameraBounds',),
+            filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
             verbose: bool = False
     ):
         # Set verbose mode
@@ -49,6 +49,9 @@ class Simulator:
 
         # Get camera matrix
         self.camera_matrix = self.get_camera_matrix()
+
+        # Get camera spawn points:
+        self.spawn_points = self.init_camera_spawn()
 
         # Get all visible objects
         self.objects = OrderedDict([
@@ -206,6 +209,55 @@ class Simulator:
         progress_bar.close()
 
         return static_point_clouds, dynamic_point_clouds
+
+    def init_camera_spawn(self) -> np.ndarray:
+        # The camera spawn is the camera's initial position
+        world_vertices = np.array(self.camera.location)[None]
+
+        # If there is a CameraSpawn object, use it to sample camera spawn points
+        if 'CameraSpawn' in self.scene.objects:
+            # Create volume sampling geometry node
+            spawn_node = bpy.data.node_groups.new(name="Spawn", type='GeometryNodeTree')
+            spawn_input_node = spawn_node.nodes.new(type='NodeGroupInput')
+            spawn_output_node = spawn_node.nodes.new(type='NodeGroupOutput')
+            spawn_volume_node = spawn_node.nodes.new(type='GeometryNodeMeshToVolume')
+            spawn_points_node = spawn_node.nodes.new(type='GeometryNodeDistributePointsInVolume')
+            spawn_vertices_node = spawn_node.nodes.new(type="GeometryNodePointsToVertices")
+            spawn_realize_node = spawn_node.nodes.new(type="GeometryNodeRealizeInstances")
+            spawn_node.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+            spawn_node.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            spawn_node.links.new(spawn_input_node.outputs["Geometry"], spawn_volume_node.inputs["Mesh"])
+            spawn_node.links.new(spawn_volume_node.outputs["Volume"], spawn_points_node.inputs["Volume"])
+            spawn_node.links.new(spawn_points_node.outputs["Points"], spawn_vertices_node.inputs["Points"])
+            spawn_node.links.new(spawn_vertices_node.outputs["Mesh"], spawn_realize_node.inputs["Geometry"])
+            spawn_node.links.new(spawn_realize_node.outputs["Geometry"], spawn_output_node.inputs["Geometry"])
+            spawn_points_node.inputs['Density'].default_value = 1000.0
+
+            # Get CameraSpawn object
+            obj = self.scene.objects['CameraSpawn']
+
+            # Apply Spawn modifier to object
+            obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
+            obj_modifier.node_group = spawn_node
+
+            # Convert to mesh to apply modifiers
+            evaluated_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            mesh = evaluated_obj.to_mesh()
+
+            # Get vertices in object coordinates
+            mesh_vertices = np.empty(len(mesh.vertices) * 3)
+            mesh.vertices.foreach_get('co', mesh_vertices)
+            mesh_vertices = mesh_vertices.reshape(-1, 3)
+
+            # Store spawn points in world coordinates
+            world_from_obj = np.array(obj.matrix_world)
+            world_vertices = (world_from_obj[:3, :3] @ mesh_vertices.T + world_from_obj[:3, 3:]).T
+
+            # Clear memory and remove object
+            evaluated_obj.to_mesh_clear()
+            bpy.data.objects.remove(obj)
+
+        return world_vertices
 
     def render(self) -> tuple[np.ndarray, np.ndarray]:
         # Mute blender and render the scene
@@ -365,6 +417,21 @@ class Simulator:
 
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
         return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
+
+    def respawn_camera(self):
+        # Respawn the camera at a random spawn point
+        x, y, z = self.spawn_points[np.random.randint(len(self.spawn_points))]
+
+        # Set the camera pose
+        self.set_world_from_camera(np.array([
+            [1, 0, 0, x],
+            [0, 0, 1, y],
+            [0, -1, 0, z],
+            [0, 0, 0, 1]
+        ]), check_collisions=False)
+
+        # Randomly rotate the camera around the z-axis
+        self.rotate_camera_yaw(np.random.uniform(0, 2 * np.pi), degrees=False)
 
     def move_camera_forward(self, distance: float):
         # Move camera along the z-axis
