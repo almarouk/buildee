@@ -1,3 +1,5 @@
 opencv-python
 matplotlib
 tqdm
+gymnasium
+stable-baselines3

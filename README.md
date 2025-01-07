@@ -28,3 +28,6 @@ Install module requirements:
 ```bash
 pip install -r requirements.txt
 ```
+
+#### Troubleshooting
+When installing on a headless server, remember to disable X11 forwarding.

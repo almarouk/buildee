@@ -1,5 +1,7 @@
 import os.path
 
+from simulator import Simulator
+
 import cv2
 import gymnasium as gym
 import numpy as np
@@ -7,11 +9,10 @@ from stable_baselines3 import PPO
 from stable_baselines3.common import logger
 from stable_baselines3.common.callbacks import BaseCallback
 
-from simulator import Simulator
-
 
 class CheckpointCallback(BaseCallback):
     """Custom callback for saving model checkpoints during training."""
+
     def __init__(self, save_freq, save_path, verbose=0):
         super().__init__(verbose)
         self.save_freq = save_freq
@@ -26,12 +27,9 @@ class CheckpointCallback(BaseCallback):
 
 
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_file: str, max_steps: int = 50):
+    def __init__(self, blend_file: str, max_steps: int = 50, show_rgb: bool = False):
         super().__init__()
         self.blend_file = blend_file
-
-        # Initialize simulator
-        self.simulator = None
 
         # Define maximum number of steps
         self.max_steps = max_steps
@@ -45,6 +43,9 @@ class SimulatorEnv(gym.Env):
 
         # Initialize simulator
         self.simulator = Simulator(self.blend_file, points_density=100.0)
+
+        # Whether to display rendered image during training
+        self.show_rgb = show_rgb
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
         """Reset the environment and return initial observation."""
@@ -102,8 +103,9 @@ class SimulatorEnv(gym.Env):
         self.simulator.get_point_cloud(update_mask=True)
 
         # Display rendered image
-        cv2.imshow(f'rgb', cv2.cvtColor(np.moveaxis(image, 0, 2), cv2.COLOR_RGB2BGR))
-        cv2.waitKey(1)
+        if self.show_rgb:
+            cv2.imshow(f'rgb', cv2.cvtColor(np.moveaxis(image, 0, 2), cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
 
         # Get reward, termination, and truncation
         is_last_step = self.current_step >= self.max_steps
@@ -130,7 +132,7 @@ if __name__ == "__main__":
     env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend')
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
     checkpointer = CheckpointCallback(save_freq=10000, save_path='checkpoint', verbose=1)
-    
+
     # Load or create model
     if os.path.exists('checkpoint.zip'):
         model = PPO.load('checkpoint', env=env, verbose=1)
