@@ -275,6 +275,9 @@ class Simulator:
             self.scene.render.resolution_y, self.scene.render.resolution_x, 4
         ), axis=0)
 
+        # Clear blender image data
+        bpy.data.images.remove(render)
+
         return rgbd[:, :, :3], rgbd[:, :, 3]
 
     def get_camera_matrix(self) -> np.ndarray:
