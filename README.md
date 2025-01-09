@@ -9,7 +9,11 @@ Setup the conda environment:
 ```bash
 conda create -n blender python=3.11
 conda activate blender
-pip install numpy==1.24.3  # numpy version required by blender
+```
+
+Install the numpy version required by blender:
+```bash
+pip install numpy==1.24.3
 ```
 
 With the conda environment **activated**,
@@ -21,10 +25,14 @@ cd blender-construction/blender
 ./build_files/utils/make_update.py --use-linux-libraries  # update dependencies
 make bpy  # build bpy module
 python3 ./build_files/utils/make_bpy_wheel.py ../build_linux_bpy/bin/  # create wheel
-pip3 install ../build_linux_bpy/bin/bpy-4.4.0a0-cp311-cp311-manylinux_2_31_x86_64.whl  # install bpy
 ```
 
-Install module requirements:
+Then, install blender's `bpy` python module:
+```bash
+pip3 install ../build_linux_bpy/bin/bpy-4.4.0a0-cp311-cp311-manylinux_2_31_x86_64.whl
+```
+
+Install your compatible [PyTorch](https://pytorch.org/) version. Then install other requirements:
 ```bash
 pip install -r requirements.txt
 ```
