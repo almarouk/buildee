@@ -1,4 +1,5 @@
 import os.path
+from pathlib import Path
 
 from simulator import Simulator
 from model import TimeSformerExtractor
@@ -28,9 +29,9 @@ class CheckpointCallback(BaseCallback):
 
 
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_file: str, max_steps: int = 50, show_rgb: bool = False):
+    def __init__(self, blend_dir: Path, max_steps: int = 50, show_rgb: bool = False):
         super().__init__()
-        self.blend_file = blend_file
+        self.blend_dir = blend_dir
 
         # Define maximum number of steps
         self.max_steps = max_steps
@@ -53,8 +54,11 @@ class SimulatorEnv(gym.Env):
         self.prev_obs = []
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
-        """Reset the environment and return initial observation."""
-        self.simulator = Simulator(self.blend_file, points_density=100.0)
+        # Load a random scene
+        blend_file = np.random.choice(list(self.blend_dir.glob('*.blend')))
+        self.simulator = Simulator(blend_file, points_density=100.0)
+
+        # Reset current step
         self.current_step = 0
 
         # Set initial camera pose
@@ -141,7 +145,7 @@ class SimulatorEnv(gym.Env):
 
 if __name__ == "__main__":
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend', show_rgb=True)
+    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=True)
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
     checkpointer = CheckpointCallback(save_freq=10000, save_path='checkpoint', verbose=1)
 
