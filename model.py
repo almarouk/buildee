@@ -30,12 +30,5 @@ class TimeSformerExtractor(BaseFeaturesExtractor):
         # GELU activation
         self.gelu = torch.nn.GELU(approximate='none')
 
-        # Disable grad for all layers except for the last layer
-        # for param_name, param in self.timesformer.named_parameters():
-        #     if 'model.head' in param_name:
-        #         param.requires_grad = True
-        #     else:
-        #         param.requires_grad = False
-
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        return self.gelu(self.timesformer(observations[:, :, None].repeat(1, 1, 8, 1, 1)))
+        return self.gelu(self.timesformer(observations))

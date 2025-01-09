@@ -1,6 +1,7 @@
 import os.path
 
 from simulator import Simulator
+from model import TimeSformerExtractor
 
 import cv2
 import gymnasium as gym
@@ -36,40 +37,41 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Define image observation space
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 8, 224, 224), dtype=np.uint8)
 
         # Define action space: xyz and yaw
         self.action_space = gym.spaces.Discrete(8)
 
-        # Initialize simulator
-        self.simulator = Simulator(self.blend_file, points_density=100.0)
-
         # Whether to display rendered image during training
         self.show_rgb = show_rgb
 
+        # Setup frame observations indices
+        self.frame_indices = np.int64(np.round(np.logspace(0, np.log10(max_steps * 2 / 3), 7))).tolist()
+
+        # Initialize simulator and previous observations
+        self.simulator = None
+        self.prev_obs = []
+
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
         """Reset the environment and return initial observation."""
+        self.simulator = Simulator(self.blend_file, points_density=100.0)
         self.current_step = 0
 
         # Set initial camera pose
-        self.simulator.set_world_from_camera(np.array([
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, -6.0],
-            [0.0, -1.0, 0.0, 4.5],
-            [0.0, 0.0, 0.0, 1.0]
-        ]), check_collisions=False)
-        # self.simulator.respawn_camera()
+        self.simulator.respawn_camera()
 
-        # Reset observed points
-        self.simulator.observed_points_mask[:] = False
-
-        # Get initial observed points
+        # Render image and update point cloud
+        image = self.render_image()
         self.simulator.get_point_cloud(update_mask=True)
 
-        # Get observation
-        image = self.render_image()
+        # Build observations based on rendered image
+        observations = np.zeros((3, 8, 224, 224), dtype=np.uint8)
+        observations[:, 0] = image
 
-        return image, {}
+        # Setup previous observations
+        self.prev_obs = [image]
+
+        return observations, {}
 
     def step(
             self, action: gym.core.ActType
@@ -98,9 +100,19 @@ class SimulatorEnv(gym.Env):
             case _:
                 raise ValueError(f'Invalid action: {action}')
 
-        # Get observation
+        # Render image and update point cloud
         image = self.render_image()
         self.simulator.get_point_cloud(update_mask=True)
+
+        # Build observations based on last 8 frames
+        observations = np.zeros((3, 8, 224, 224), dtype=np.uint8)
+        observations[:, 0] = image
+        for i, frame_idx in enumerate(self.frame_indices):
+            if frame_idx <= len(self.prev_obs):
+                observations[:, i + 1] = self.prev_obs[-frame_idx]
+
+        # Update previous observations
+        self.prev_obs.append(image)
 
         # Display rendered image
         if self.show_rgb:
@@ -119,7 +131,7 @@ class SimulatorEnv(gym.Env):
             terminated = True
             reward = self.simulator.observed_points_mask.mean()
 
-        return image, reward, terminated, False, {}
+        return observations, reward, terminated, False, {}
 
     def render_image(self):
         rgb, depth = self.simulator.render()
@@ -129,20 +141,27 @@ class SimulatorEnv(gym.Env):
 
 if __name__ == "__main__":
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend')
+    env = SimulatorEnv(blend_file='/home/clementin/Data/blendernbv/liberty.blend', show_rgb=True)
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
     checkpointer = CheckpointCallback(save_freq=10000, save_path='checkpoint', verbose=1)
 
+    # Setup policy
+    policy_kwargs = {
+        'features_extractor_class': TimeSformerExtractor,
+        'features_extractor_kwargs': {'features_dim': 256},
+    }
+
     # Load or create model
     if os.path.exists('checkpoint.zip'):
-        model = PPO.load('checkpoint', env=env, verbose=1)
+        model = PPO.load('checkpoint', env=env, policy_kwargs=policy_kwargs, verbose=1)
     else:
         model = PPO(
             'CnnPolicy',
             env,
+            policy_kwargs=policy_kwargs,
             verbose=1
         )
 
     # Train model
     model.set_logger(logger)
-    model.learn(total_timesteps=1000000, callback=checkpointer)
+    model.learn(total_timesteps=10000000, callback=checkpointer)
