@@ -38,6 +38,9 @@ class Simulator:
         # Get the current camera
         self.camera = self.scene.camera
 
+        # Set camera clip start
+        self.camera.data.clip_start = 0.01
+
         # Get the current view layer
         self.view_layer = bpy.context.view_layer
 
@@ -231,6 +234,7 @@ class Simulator:
             spawn_node.links.new(spawn_points_node.outputs["Points"], spawn_vertices_node.inputs["Points"])
             spawn_node.links.new(spawn_vertices_node.outputs["Mesh"], spawn_realize_node.inputs["Geometry"])
             spawn_node.links.new(spawn_realize_node.outputs["Geometry"], spawn_output_node.inputs["Geometry"])
+            spawn_volume_node.inputs['Voxel Amount'].default_value = 256.0
             spawn_points_node.inputs['Density'].default_value = 1000.0
 
             # Get CameraSpawn object
