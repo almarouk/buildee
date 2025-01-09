@@ -486,8 +486,12 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('/home/clementin/Data/blendernbv/liberty.blend', points_density=100.0, verbose=True)
+    simulator = Simulator('test.blend', points_density=100.0, verbose=True)
 
+    # Spawn the camera at a random position
+    simulator.respawn_camera()
+
+    # Setup depth colormap
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
 
@@ -514,16 +518,20 @@ if __name__ == '__main__':
         elif key == 27:  # escape key
             break
 
+        # Render image
         rgb, depth = simulator.render()
 
+        # Setup depth for display
         depth = depth_color_map(
             depth.clip(0, max_depth_distance_display) / max_depth_distance_display
         )
 
+        # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
         simulator.get_point_cloud(imshow=True)
 
-        # simulator.step_frame()
+        # Step to next frame (update animations)
+        simulator.step_frame()
 
     cv2.destroyAllWindows()
