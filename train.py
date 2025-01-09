@@ -145,9 +145,9 @@ class SimulatorEnv(gym.Env):
 
 if __name__ == "__main__":
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=True)
+    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=False)
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
-    checkpointer = CheckpointCallback(save_freq=10000, save_path='checkpoint', verbose=1)
+    checkpointer = CheckpointCallback(save_freq=1000, save_path='checkpoint', verbose=1)
 
     # Setup policy
     policy_kwargs = {

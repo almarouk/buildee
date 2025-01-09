@@ -39,3 +39,19 @@ pip install -r requirements.txt
 
 #### Troubleshooting
 When installing on a headless server, remember to disable X11 forwarding.
+
+
+## Training
+
+We provide a toy reinforcement learning application, showing how to use our blender wrapper to train a next-best-view
+agent.
+
+### Additional dependencies
+Training this agent requires TimeSformer, an efficient video model that can be easily installed from the
+[repository](https://github.com/facebookresearch/TimeSformer).
+
+### Pre-trained weights
+You can download pre-trained TimeSformer weights from the
+[TimeSformer repository](https://github.com/facebookresearch/TimeSformer).
+We use [these weights](https://www.dropbox.com/s/4h2qt41m2z3aqrb/TimeSformer_divST_8x32_224_K600.pyth?dl=0),
+pre-trained on the K600 dataset using 8 frames. 
