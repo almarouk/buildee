@@ -49,9 +49,10 @@ class SimulatorEnv(gym.Env):
         # Setup frame observations indices
         self.frame_indices = np.int64(np.round(np.logspace(0, np.log10(max_steps * 2 / 3), 7))).tolist()
 
-        # Initialize simulator and previous observations
+        # Initialize simulator, previous observations and previous observed points mask
         self.simulator = None
         self.prev_obs = []
+        self.prev_observed_points_mask = None
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
         # Load a random scene
@@ -72,8 +73,9 @@ class SimulatorEnv(gym.Env):
         observations = np.zeros((3, 8, 224, 224), dtype=np.uint8)
         observations[:, 0] = image
 
-        # Setup previous observations
+        # Setup previous observations and observed points mask
         self.prev_obs = [image]
+        self.prev_observed_points_mask = self.simulator.observed_points_mask.copy()
 
         return observations, {}
 
@@ -126,14 +128,14 @@ class SimulatorEnv(gym.Env):
         # Get reward, termination, and truncation
         is_last_step = self.current_step >= self.max_steps
         terminated = False
-        reward = 0.0
+        reward = self.compute_coverage_gain()
 
         if collided:
             terminated = True
-            reward = -1.0
+            reward = -1.0 * self.max_steps
         elif is_last_step:
             terminated = True
-            reward = self.simulator.observed_points_mask.mean()
+            reward = self.simulator.observed_points_mask.mean() * self.max_steps
 
         return observations, reward, terminated, False, {}
 
@@ -141,6 +143,12 @@ class SimulatorEnv(gym.Env):
         rgb, depth = self.simulator.render()
         rgb = np.ascontiguousarray(np.moveaxis(rgb, 2, 0) * 255).astype(np.uint8)
         return rgb
+
+    def compute_coverage_gain(self) -> float:
+        new_observed_points_mask = self.simulator.observed_points_mask.copy()
+        coverage_gain = np.mean(new_observed_points_mask & ~self.prev_observed_points_mask)
+        self.prev_observed_points_mask = new_observed_points_mask
+        return coverage_gain
 
 
 if __name__ == "__main__":
