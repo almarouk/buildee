@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from blender_utils import is_animated, get_visible_objects, compute_bvh_tree
+from blender_utils import is_animated, get_visible_objects, compute_bvh_tree, get_label
 from os_utils import redirect_output_to_null, restore_output
 
 
@@ -45,10 +45,10 @@ class Simulator:
         self.view_layer = bpy.context.view_layer
 
         # Get os temp dir
-        temp_dir = Path(tempfile.gettempdir())
+        self.temp_dir = Path(tempfile.gettempdir())
 
         # Get rendered image path
-        self.render_path = temp_dir / 'render.exr'
+        self.render_path = self.temp_dir / 'render.exr'
 
         # Get camera matrix
         self.camera_matrix = self.get_camera_matrix()
@@ -109,6 +109,26 @@ class Simulator:
         self.scene.render.image_settings.color_depth = '32'
         self.scene.render.image_settings.exr_codec = 'NONE'
         self.scene.render.filepath = str(self.render_path)
+
+        # Setup semantic segmentation
+        self.view_layer.use_pass_cryptomatte_object = True
+        self.view_layer.pass_cryptomatte_depth = 2
+        self.matte_output_node = self.scene.node_tree.nodes.new(type='CompositorNodeOutputFile')
+        self.matte_output_node.base_path = str(self.temp_dir)
+        self.matte_output_node.format.file_format = 'OPEN_EXR'
+        self.matte_output_node.format.color_mode = 'RGB'
+        self.matte_output_node.format.color_depth = '32'
+        self.matte_output_node.format.exr_codec = 'NONE'
+        self.matte_output_node.format.color_management = 'OVERRIDE'
+        self.matte_output_node.format.linear_colorspace_settings.name = 'Non-Color'
+        self.matte_output_node.file_slots[0].path = 'matte'
+        self.object_labels = OrderedDict(
+            (obj, get_label(obj)) for obj in self.objects
+        )
+        self.labels = list(set(self.object_labels.values()))
+        if self.verbose:
+            print(f'Found {len(self.labels)} labels: {self.labels}')
+        self.init_semantic_segmentation()
 
     def init_vertices_polygons(self) -> tuple[
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]],
@@ -263,7 +283,54 @@ class Simulator:
 
         return world_vertices
 
-    def render(self) -> tuple[np.ndarray, np.ndarray]:
+    def init_semantic_segmentation(self):
+
+        mix_matte_nodes, mix_depth_nodes = [], []
+
+        for label in self.labels:
+
+            object_names = [obj.name for obj, obj_label in self.object_labels.items() if obj_label == label]
+            matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeCryptomatteV2')
+            matte_node.matte_id = ','.join(object_names)
+
+            math_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
+            math_node.operation = 'GREATER_THAN'
+
+            mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
+            mix_matte_node.blend_type = 'MULTIPLY'
+            mix_matte_node.inputs[2].default_value = (*np.random.rand(3), 1)
+
+            mix_depth_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
+            mix_depth_node.inputs[1].default_value = (99999, 99999, 99999, 1)
+
+            self.scene.node_tree.links.new(matte_node.outputs['Matte'], math_node.inputs[0])
+            self.scene.node_tree.links.new(math_node.outputs['Value'], mix_matte_node.inputs[1])
+            self.scene.node_tree.links.new(math_node.outputs['Value'], mix_depth_node.inputs[0])
+            self.scene.node_tree.links.new(self.render_node.outputs['Depth'], mix_depth_node.inputs[2])
+
+            mix_matte_nodes.append(mix_matte_node)
+            mix_depth_nodes.append(mix_depth_node)
+
+        last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
+        last_zcombine_node.use_antialias_z = False
+        self.scene.node_tree.links.new(mix_matte_nodes[0].outputs['Image'], last_zcombine_node.inputs[0])
+        self.scene.node_tree.links.new(mix_depth_nodes[0].outputs['Image'], last_zcombine_node.inputs[1])
+        self.scene.node_tree.links.new(mix_matte_nodes[0].outputs['Image'], last_zcombine_node.inputs[2])
+        self.scene.node_tree.links.new(mix_depth_nodes[0].outputs['Image'], last_zcombine_node.inputs[3])
+
+        for i in range(1, len(self.labels)):
+            zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
+            zcombine_node.use_antialias_z = False
+            self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], zcombine_node.inputs[0])
+            self.scene.node_tree.links.new(last_zcombine_node.outputs['Z'], zcombine_node.inputs[1])
+            self.scene.node_tree.links.new(mix_matte_nodes[i].outputs['Image'], zcombine_node.inputs[2])
+            self.scene.node_tree.links.new(mix_depth_nodes[i].outputs['Image'], zcombine_node.inputs[3])
+            last_zcombine_node = zcombine_node
+
+        # add a file output node
+        self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
+
+    def render(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         # Mute blender and render the scene
         devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
         bpy.ops.render.render(write_still=True)  # render the scene
@@ -282,7 +349,24 @@ class Simulator:
         # Clear blender image data
         bpy.data.images.remove(render)
 
-        return rgbd[:, :, :3], rgbd[:, :, 3]
+        # Load semantic segmentation data
+        matte_path = self.temp_dir / f'matte{self.scene.frame_current:04d}.exr'
+        render = bpy.data.images.load(str(matte_path))
+
+        # Read semantic segmentation data
+        matte = np.empty(len(render.pixels), dtype=np.float32)
+        render.pixels.foreach_get(matte)
+        matte = np.flip(matte.reshape(
+            self.scene.render.resolution_y, self.scene.render.resolution_x, 4
+        ), axis=0)
+
+        # Clear semantic segmentation image data
+        bpy.data.images.remove(render)
+
+        # Remove matte file
+        matte_path.unlink()
+
+        return rgbd[:, :, :3], rgbd[:, :, 3], matte[:, :, :3]
 
     def get_camera_matrix(self) -> np.ndarray:
         image_width = self.scene.render.resolution_x
@@ -519,7 +603,7 @@ if __name__ == '__main__':
             break
 
         # Render image
-        rgb, depth = simulator.render()
+        rgb, depth, segmentation = simulator.render()
 
         # Setup depth for display
         depth = depth_color_map(
@@ -529,6 +613,7 @@ if __name__ == '__main__':
         # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
+        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(segmentation * 255), cv2.COLOR_RGB2BGR))
         simulator.get_point_cloud(imshow=True)
 
         # Step to next frame (update animations)

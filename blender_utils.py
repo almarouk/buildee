@@ -3,6 +3,7 @@ from collections import OrderedDict
 import bpy
 import mathutils
 import numpy as np
+import re
 
 
 def has_animation_data(obj: bpy.types.Object) -> bool:
@@ -36,6 +37,14 @@ def get_visible_objects(collection: bpy.types.Collection, filter_names: list[str
         obj for col in collections for obj in col.collection.objects
         if (obj.type == 'MESH') and (not obj.hide_render) and (obj.name not in filter_names)
     ]
+
+
+def get_label(obj: bpy.types.Object) -> str:
+    # The label of an object is its name without the Blender duplicate number, e.g., 'Cube.001' has class 'Cube'
+    root_name = re.findall(r'(.+)\.\d+$', obj.name)
+    if len(root_name) > 0:
+        return root_name[0]
+    return obj.name
 
 
 def compute_bvh_tree(
