@@ -7,12 +7,14 @@ import re
 
 
 def has_animation_data(obj: bpy.types.Object) -> bool:
+    # Returns True if the object has animation data
     if obj.animation_data is not None:
         return (obj.animation_data.action is not None) or (obj.animation_data.drivers is not None)
     return False
 
 
 def is_animated(obj: bpy.types.Object) -> bool:
+    # Returns True if the object or any of its parents have animation data
     if has_animation_data(obj):
         return True
     elif obj.parent:
