@@ -9,7 +9,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from blender_utils import is_animated, get_visible_objects, compute_bvh_tree, get_label
+from blender_utils import (
+    is_animated,
+    get_visible_objects,
+    compute_bvh_tree,
+    get_label,
+    random_colors_without_replacement
+)
 from os_utils import redirect_output_to_null, restore_output
 
 
@@ -126,6 +132,7 @@ class Simulator:
             (obj, get_label(obj)) for obj in self.objects
         )
         self.labels = list(set(self.object_labels.values()))
+        self.label_colors = random_colors_without_replacement(len(self.labels)) / 255  # rendering colors
         if self.verbose:
             print(f'Found {len(self.labels)} labels: {self.labels}')
         self.init_semantic_segmentation()
@@ -287,7 +294,7 @@ class Simulator:
 
         mix_matte_nodes, mix_depth_nodes = [], []
 
-        for label in self.labels:
+        for label, color in zip(self.labels, self.label_colors):
 
             object_names = [obj.name for obj, obj_label in self.object_labels.items() if obj_label == label]
             matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeCryptomatteV2')
@@ -298,7 +305,7 @@ class Simulator:
 
             mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
             mix_matte_node.blend_type = 'MULTIPLY'
-            mix_matte_node.inputs[2].default_value = (*np.random.rand(3), 1)
+            mix_matte_node.inputs[2].default_value = (*color, 1)
 
             mix_depth_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
             mix_depth_node.inputs[1].default_value = (99999, 99999, 99999, 1)
@@ -327,7 +334,6 @@ class Simulator:
             self.scene.node_tree.links.new(mix_depth_nodes[i].outputs['Image'], zcombine_node.inputs[3])
             last_zcombine_node = zcombine_node
 
-        # add a file output node
         self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
 
     def render(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -358,7 +364,13 @@ class Simulator:
         render.pixels.foreach_get(matte)
         matte = np.flip(matte.reshape(
             self.scene.render.resolution_y, self.scene.render.resolution_x, 4
-        ), axis=0)
+        ), axis=0)[:, :, :3]
+
+        # Assign label ids to matte image
+        matte_ids = -np.ones(matte.shape[:2], dtype=np.int32)
+        for i, color in enumerate(self.label_colors):
+            mask = np.all(np.abs(matte - color) < 1 / 255, axis=2)
+            matte_ids[mask] = i
 
         # Clear semantic segmentation image data
         bpy.data.images.remove(render)
@@ -366,7 +378,7 @@ class Simulator:
         # Remove matte file
         matte_path.unlink()
 
-        return rgbd[:, :, :3], rgbd[:, :, 3], matte[:, :, :3]
+        return rgbd[:, :, :3], rgbd[:, :, 3], matte_ids
 
     def get_camera_matrix(self) -> np.ndarray:
         image_width = self.scene.render.resolution_x
@@ -573,11 +585,14 @@ if __name__ == '__main__':
     simulator = Simulator('test.blend', points_density=100.0, verbose=True)
 
     # Spawn the camera at a random position
-    simulator.respawn_camera()
+    # simulator.respawn_camera()
 
     # Setup depth colormap
     depth_color_map = plt.get_cmap('magma')
     max_depth_distance_display = 10.0
+
+    # Setup segmentation colormap
+    seg_color_map = plt.get_cmap('jet')
 
     for _ in tqdm.tqdm(range(999999999)):
 
@@ -603,17 +618,20 @@ if __name__ == '__main__':
             break
 
         # Render image
-        rgb, depth, segmentation = simulator.render()
+        rgb, depth, seg = simulator.render()
 
         # Setup depth for display
         depth = depth_color_map(
             depth.clip(0, max_depth_distance_display) / max_depth_distance_display
         )
 
+        # Setup segmentation for display
+        seg = seg_color_map((seg + 1) / len(simulator.labels))
+
         # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
-        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(segmentation * 255), cv2.COLOR_RGB2BGR))
+        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(seg * 255), cv2.COLOR_RGB2BGR))
         simulator.get_point_cloud(imshow=True)
 
         # Step to next frame (update animations)
