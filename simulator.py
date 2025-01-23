@@ -292,16 +292,17 @@ class Simulator:
 
     def init_semantic_segmentation(self):
         # Create a Cryptomatte node for each object label
-        mix_matte_nodes, mix_depth_nodes = [], []
+        last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
+        last_zcombine_node.use_antialias_z = False
 
-        for label, color in zip(self.labels, self.label_colors):
-
-            # Get all object that have the current label
-            object_names = [obj.name for obj, obj_label in self.object_labels.items() if obj_label == label]
+        for obj_id, (obj, obj_label) in enumerate(self.object_labels.items()):
+            # Get label id and color
+            label_id = self.labels.index(obj_label)
+            color = self.label_colors[label_id]
 
             # Create a Cryptomatte node for the current label
             matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeCryptomatteV2')
-            matte_node.matte_id = ','.join(object_names)
+            matte_node.matte_id = obj.name
 
             # Cryptomattes are anti-aliased, so we need to threshold them
             math_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
@@ -315,7 +316,9 @@ class Simulator:
             # We are going to merge cryptomattes based on depth,
             # so we set the depth to a high value where the mask is zero
             mix_depth_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
-            mix_depth_node.inputs[1].default_value = (99999, 99999, 99999, 1)
+            mix_depth_node.inputs[1].default_value = (
+                self.camera.data.clip_end, self.camera.data.clip_end, self.camera.data.clip_end, 1
+            )
 
             # Link the nodes
             self.scene.node_tree.links.new(matte_node.outputs['Matte'], math_node.inputs[0])
@@ -323,28 +326,19 @@ class Simulator:
             self.scene.node_tree.links.new(math_node.outputs['Value'], mix_depth_node.inputs[0])
             self.scene.node_tree.links.new(self.render_node.outputs['Depth'], mix_depth_node.inputs[2])
 
-            # Store the nodes to merge them later to obtain the final segmentation map
-            mix_matte_nodes.append(mix_matte_node)
-            mix_depth_nodes.append(mix_depth_node)
-
-        # Merge all the cryptomattes based on depth
-        # The first matte node is left unchanged
-        last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
-        last_zcombine_node.use_antialias_z = False
-        self.scene.node_tree.links.new(mix_matte_nodes[0].outputs['Image'], last_zcombine_node.inputs[0])
-        self.scene.node_tree.links.new(mix_depth_nodes[0].outputs['Image'], last_zcombine_node.inputs[1])
-        self.scene.node_tree.links.new(mix_matte_nodes[0].outputs['Image'], last_zcombine_node.inputs[2])
-        self.scene.node_tree.links.new(mix_depth_nodes[0].outputs['Image'], last_zcombine_node.inputs[3])
-
-        # Iterate through all the other matte nodes and ZCombine the current node with the previous one
-        for i in range(1, len(self.labels)):
-            zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
-            zcombine_node.use_antialias_z = False
-            self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], zcombine_node.inputs[0])
-            self.scene.node_tree.links.new(last_zcombine_node.outputs['Z'], zcombine_node.inputs[1])
-            self.scene.node_tree.links.new(mix_matte_nodes[i].outputs['Image'], zcombine_node.inputs[2])
-            self.scene.node_tree.links.new(mix_depth_nodes[i].outputs['Image'], zcombine_node.inputs[3])
-            last_zcombine_node = zcombine_node
+            if obj_id == 0:
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], last_zcombine_node.inputs[0])
+                self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[1])
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], last_zcombine_node.inputs[2])
+                self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[3])
+            else:
+                zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
+                zcombine_node.use_antialias_z = False
+                self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], zcombine_node.inputs[0])
+                self.scene.node_tree.links.new(last_zcombine_node.outputs['Z'], zcombine_node.inputs[1])
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], zcombine_node.inputs[2])
+                self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], zcombine_node.inputs[3])
+                last_zcombine_node = zcombine_node
 
         # Connect the final ZCombine node to the matte output node
         self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
@@ -595,7 +589,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('test.blend', points_density=100.0, verbose=True)
+    simulator = Simulator('construction.blend', points_density=0.0, verbose=True)
 
     # Spawn the camera at a random position
     # simulator.respawn_camera()
@@ -645,7 +639,7 @@ if __name__ == '__main__':
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(seg * 255), cv2.COLOR_RGB2BGR))
-        simulator.get_point_cloud(imshow=True)
+        # simulator.get_point_cloud(imshow=True)
 
         # Step to next frame (update animations)
         simulator.step_frame()
