@@ -66,12 +66,3 @@ def compute_bvh_tree(
         polygons.extend(polys)
 
     return mathutils.bvhtree.BVHTree.FromPolygons(vertices, polygons, epsilon=0.0)
-
-
-def random_colors_without_replacement(num_colors: int) -> np.ndarray:
-    # Generate random colors without replacement
-    for _ in range(100):
-        colors = np.random.randint(0, 256, (num_colors, 3), dtype=np.uint8)
-        if len(np.unique(colors, axis=0)) == num_colors:
-            return colors
-    raise ValueError('Could not generate unique random colors')

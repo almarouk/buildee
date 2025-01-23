@@ -13,8 +13,7 @@ from blender_utils import (
     is_animated,
     get_visible_objects,
     compute_bvh_tree,
-    get_label,
-    random_colors_without_replacement
+    get_label
 )
 from os_utils import redirect_output_to_null, restore_output
 
@@ -122,7 +121,7 @@ class Simulator:
         self.matte_output_node = self.scene.node_tree.nodes.new(type='CompositorNodeOutputFile')
         self.matte_output_node.base_path = str(self.temp_dir)
         self.matte_output_node.format.file_format = 'OPEN_EXR'
-        self.matte_output_node.format.color_mode = 'RGB'
+        self.matte_output_node.format.color_mode = 'BW'
         self.matte_output_node.format.color_depth = '32'
         self.matte_output_node.format.exr_codec = 'NONE'
         self.matte_output_node.format.color_management = 'OVERRIDE'
@@ -132,7 +131,6 @@ class Simulator:
             (obj, get_label(obj)) for obj in self.objects
         )
         self.labels = list(set(self.object_labels.values()))
-        self.label_colors = random_colors_without_replacement(len(self.labels)) / 255  # rendering colors
         if self.verbose:
             print(f'Found {len(self.labels)} labels: {self.labels}')
         self.init_semantic_segmentation()
@@ -296,9 +294,8 @@ class Simulator:
         last_zcombine_node.use_antialias_z = False
 
         for obj_id, (obj, obj_label) in enumerate(self.object_labels.items()):
-            # Get label id and color
+            # Get label id
             label_id = self.labels.index(obj_label)
-            color = self.label_colors[label_id]
 
             # Create a Cryptomatte node for the current label
             matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeCryptomatteV2')
@@ -307,11 +304,12 @@ class Simulator:
             # Cryptomattes are anti-aliased, so we need to threshold them
             math_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
             math_node.operation = 'GREATER_THAN'
+            math_node.inputs[1].default_value = 0.1
 
             # Apply a color to the cryptomatte mask
-            mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMixRGB')
-            mix_matte_node.blend_type = 'MULTIPLY'
-            mix_matte_node.inputs[2].default_value = (*color, 1)
+            mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
+            mix_matte_node.operation = 'MULTIPLY'
+            mix_matte_node.inputs[1].default_value = label_id + 1
 
             # We are going to merge cryptomattes based on depth,
             # so we set the depth to a high value where the mask is zero
@@ -322,21 +320,21 @@ class Simulator:
 
             # Link the nodes
             self.scene.node_tree.links.new(matte_node.outputs['Matte'], math_node.inputs[0])
-            self.scene.node_tree.links.new(math_node.outputs['Value'], mix_matte_node.inputs[1])
+            self.scene.node_tree.links.new(math_node.outputs['Value'], mix_matte_node.inputs[0])
             self.scene.node_tree.links.new(math_node.outputs['Value'], mix_depth_node.inputs[0])
             self.scene.node_tree.links.new(self.render_node.outputs['Depth'], mix_depth_node.inputs[2])
 
             if obj_id == 0:
-                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], last_zcombine_node.inputs[0])
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], last_zcombine_node.inputs[0])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[1])
-                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], last_zcombine_node.inputs[2])
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], last_zcombine_node.inputs[2])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[3])
             else:
                 zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
                 zcombine_node.use_antialias_z = False
                 self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], zcombine_node.inputs[0])
                 self.scene.node_tree.links.new(last_zcombine_node.outputs['Z'], zcombine_node.inputs[1])
-                self.scene.node_tree.links.new(mix_matte_node.outputs['Image'], zcombine_node.inputs[2])
+                self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], zcombine_node.inputs[2])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], zcombine_node.inputs[3])
                 last_zcombine_node = zcombine_node
 
@@ -371,13 +369,10 @@ class Simulator:
         render.pixels.foreach_get(matte)
         matte = np.flip(matte.reshape(
             self.scene.render.resolution_y, self.scene.render.resolution_x, 4
-        ), axis=0)[:, :, :3]
+        ), axis=0)[:, :, 0]
 
-        # Assign label ids to matte image
-        matte_ids = -np.ones(matte.shape[:2], dtype=np.int32)
-        for i, color in enumerate(self.label_colors):
-            mask = np.all(np.abs(matte - color) < 1 / 255, axis=2)
-            matte_ids[mask] = i
+        # Assign label ids to matte image, -1 for no labels
+        matte = np.int32(matte + 0.5) - 1
 
         # Clear semantic segmentation image data
         bpy.data.images.remove(render)
@@ -385,7 +380,7 @@ class Simulator:
         # Remove matte file
         matte_path.unlink()
 
-        return rgbd[:, :, :3], rgbd[:, :, 3], matte_ids
+        return rgbd[:, :, :3], rgbd[:, :, 3], matte
 
     def get_camera_matrix(self) -> np.ndarray:
         image_width = self.scene.render.resolution_x
