@@ -157,13 +157,13 @@ class Simulator:
             mesh.vertices.foreach_get('co', mesh_vertices)
             mesh_vertices = mesh_vertices.reshape(-1, 3)
 
-            if dynamic:
+            if dynamic:  # store in dynamic vertices dict
                 polygons = [
                     list(map(lambda vertex: vertex + dynamic_vertex_offset, poly.vertices)) for poly in mesh.polygons
                 ]
                 dynamic_vertex_offset += len(mesh_vertices)
                 dynamic_verts_polys[obj] = (mesh_vertices, polygons)
-            else:
+            else:  # store in static vertices dict
                 polygons = [
                     list(map(lambda vertex: vertex + static_vertex_offset, poly.vertices)) for poly in mesh.polygons
                 ]
@@ -289,15 +289,17 @@ class Simulator:
         return world_vertices
 
     def init_semantic_segmentation(self):
-        # Create a Cryptomatte node for each object label
+        # Create a Cryptomatte node for each object in the scene
+        # Combine each Cryptomatte node based on depth
         last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
         last_zcombine_node.use_antialias_z = False
 
+        # For each object, add a Cryptomatte node and merge it with the Cryptomatte node of the previous object
         for obj_id, (obj, obj_label) in enumerate(self.object_labels.items()):
             # Get label id
             label_id = self.labels.index(obj_label)
 
-            # Create a Cryptomatte node for the current label
+            # Create a Cryptomatte node for the current object
             matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeCryptomatteV2')
             matte_node.matte_id = obj.name
 
@@ -306,7 +308,7 @@ class Simulator:
             math_node.operation = 'GREATER_THAN'
             math_node.inputs[1].default_value = 0.1
 
-            # Apply a color to the cryptomatte mask
+            # Apply its id to the cryptomatte mask
             mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
             mix_matte_node.operation = 'MULTIPLY'
             mix_matte_node.inputs[1].default_value = label_id + 1
@@ -324,12 +326,12 @@ class Simulator:
             self.scene.node_tree.links.new(math_node.outputs['Value'], mix_depth_node.inputs[0])
             self.scene.node_tree.links.new(self.render_node.outputs['Depth'], mix_depth_node.inputs[2])
 
-            if obj_id == 0:
+            if obj_id == 0:  # identity ZCombine node
                 self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], last_zcombine_node.inputs[0])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[1])
                 self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], last_zcombine_node.inputs[2])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], last_zcombine_node.inputs[3])
-            else:
+            else:  # merge with previous ZCombine node
                 zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
                 zcombine_node.use_antialias_z = False
                 self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], zcombine_node.inputs[0])
