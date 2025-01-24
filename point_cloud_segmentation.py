@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import open3d as o3d
 import matplotlib.pyplot as plt
 
 from simulator import Simulator
@@ -7,17 +8,20 @@ from simulator import Simulator
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('test.blend', points_density=0.0, verbose=True)
+    simulator = Simulator('construction.blend', points_density=0.0, verbose=True)
 
     # Get camera matrix
     camera_matrix = simulator.get_camera_matrix()
 
     # Setup voxel size
-    voxel_size = 0.5
+    voxel_size = 0.1
 
     # Initialize voxel grid and labels
     voxels = np.zeros((0, 3), dtype=np.int32)
     voxel_labels = np.zeros(0, dtype=np.int32)
+
+    # Setup label colors
+    label_colors = np.random.rand(len(simulator.labels), 3)
 
     # Setup depth colormap
     depth_color_map = plt.get_cmap('magma')
@@ -77,3 +81,14 @@ if __name__ == '__main__':
                 simulator.rotate_camera_yaw(22.5, degrees=True)
             case 7:
                 simulator.rotate_camera_yaw(-22.5, degrees=True)
+
+    # Destroy opencv windows
+    cv2.destroyAllWindows()
+
+    # Create point cloud
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(voxels * voxel_size)
+    point_cloud.colors = o3d.utility.Vector3dVector(label_colors[voxel_labels])
+
+    # Visualize point cloud
+    o3d.visualization.draw_geometries([point_cloud])
