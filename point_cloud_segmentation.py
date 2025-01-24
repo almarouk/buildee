@@ -15,8 +15,12 @@ if __name__ == '__main__':
         verbose=True
     )
 
-    # Get camera matrix
-    camera_matrix = simulator.get_camera_matrix()
+    # Setup depth colormap for display
+    depth_color_map = plt.get_cmap('magma')
+    max_depth_distance_display = 10.0
+
+    # Setup labels colormap for display
+    seg_color_map = plt.get_cmap('jet')
 
     # Setup voxel size
     voxel_size = 0.1
@@ -25,46 +29,39 @@ if __name__ == '__main__':
     voxels = np.zeros((0, 3), dtype=np.int32)
     voxel_labels = np.zeros(0, dtype=np.int32)
 
-    # Setup label colors
-    label_colors = np.random.rand(len(simulator.labels), 3)
-
-    # Setup depth colormap
-    depth_color_map = plt.get_cmap('magma')
-    max_depth_distance_display = 10.0
-
-    # Setup segmentation colormap
-    seg_color_map = plt.get_cmap('jet')
-
     for _ in range(100):
         # Render image
-        rgb, depth, seg = simulator.render()
+        rgb, depth, labels = simulator.render()
 
-        # Get valid depth values
-        valid = (depth < (simulator.camera.data.clip_end - 1)) & (seg > -1)
+        # Unproject depth to world points
+        world_points = simulator.depth_to_world_points(depth=depth)
 
-        # Unproject depth to point cloud
-        world_from_cam = simulator.get_world_from_camera()
-        v, u = np.where(valid)
-        uvws = np.stack([u + 0.5, v + 0.5, np.ones_like(u)])
-        cam_points = np.linalg.inv(camera_matrix) @ (depth[v, u] * uvws)  # unproject in camera view
-        world_points = world_from_cam[:3, :3] @ cam_points + world_from_cam[:3, 3:]  # transform to world view
-        voxels, idxs = np.unique(np.vstack([
-            voxels, np.int32(np.floor(world_points.T / voxel_size))
-        ]), return_index=True, axis=0)
-        voxel_labels = np.hstack([voxel_labels, seg[v, u]])[idxs]
+        # Get indices of valid points and known labels
+        valid = ~np.any(np.isnan(world_points), axis=2) & (labels > -1)
+
+        # Transform world points to voxels
+        view_voxels = np.int32(np.floor(world_points[valid] / voxel_size))
+
+        # Add view voxels and labels to voxel grid
+        voxels = np.vstack([voxels, view_voxels])
+        voxel_labels = np.hstack([voxel_labels, labels[valid]])
+
+        # Remove duplicates
+        voxels, idxs = np.unique(voxels, return_index=True, axis=0)
+        voxel_labels = voxel_labels[idxs]
 
         # Setup depth for display
         depth = depth_color_map(
             depth.clip(0, max_depth_distance_display) / max_depth_distance_display
         )
 
-        # Setup segmentation for display
-        seg = seg_color_map((seg + 1) / len(simulator.labels))
+        # Setup labels for display
+        labels = seg_color_map((labels + 1) / len(simulator.labels))
 
         # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
-        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(seg * 255), cv2.COLOR_RGB2BGR))
+        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(labels * 255), cv2.COLOR_RGB2BGR))
         cv2.waitKey(7)
 
         # Move camera randomly
@@ -93,7 +90,7 @@ if __name__ == '__main__':
     # Create point cloud
     point_cloud = o3d.geometry.PointCloud()
     point_cloud.points = o3d.utility.Vector3dVector(voxels * voxel_size)
-    point_cloud.colors = o3d.utility.Vector3dVector(label_colors[voxel_labels])
+    point_cloud.colors = o3d.utility.Vector3dVector(seg_color_map((voxel_labels + 1) / len(simulator.labels))[:, :3])
 
     # Visualize point cloud
     o3d.visualization.draw_geometries([point_cloud])

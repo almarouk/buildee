@@ -541,6 +541,21 @@ class Simulator:
         # Randomly rotate the camera around the z-axis
         self.rotate_camera_yaw(np.random.uniform(0, 2 * np.pi), degrees=False)
 
+    def depth_to_world_points(self, depth: np.ndarray) -> np.ndarray:
+        """Unproject depth values to world points given the current camera pose
+
+        :param depth: depth map with shape (h, w).
+        :return: 3D points in world coordinates with shape (h, w, 3).
+        """
+        world_from_cam = self.get_world_from_camera()  # get world from camera transformation matrix
+        v, u = np.where((0 < depth) & (depth < self.camera.data.clip_end - 1))  # get pixel coordinates at valid depths
+        uvws = np.stack([u + 0.5, v + 0.5, np.ones_like(u)])  # homogeneous pixel coordinates
+        cam_points = np.linalg.inv(self.camera_matrix) @ (depth[v, u] * uvws)  # unproject in camera space
+        world_points = world_from_cam[:3, :3] @ cam_points + world_from_cam[:3, 3:]  # transform to world space
+        points = np.full((*depth.shape, 3), np.nan)  # setup (h, w, 3) array, invalid depths are nan
+        points[v, u] = world_points.T  # store points where depth is valid
+        return points
+
     def move_camera_forward(self, distance: float) -> bool:
         # Move camera along the z-axis
         return self.set_camera_from_next_camera(np.array([
