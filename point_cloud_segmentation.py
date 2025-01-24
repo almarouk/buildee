@@ -8,7 +8,12 @@ from simulator import Simulator
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('construction.blend', points_density=0.0, verbose=True)
+    simulator = Simulator(
+        'construction.blend',
+        points_density=0.0,
+        segmentation_sensitivity=0.99,
+        verbose=True
+    )
 
     # Get camera matrix
     camera_matrix = simulator.get_camera_matrix()

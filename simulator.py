@@ -23,6 +23,7 @@ class Simulator:
             self,
             blend_file: str | Path,
             points_density: float = 1.0,
+            segmentation_sensitivity: float = 0.1,
             filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
             verbose: bool = False
     ):
@@ -133,7 +134,7 @@ class Simulator:
         self.labels = list(set(self.object_labels.values()))
         if self.verbose:
             print(f'Found {len(self.labels)} labels: {self.labels}')
-        self.init_semantic_segmentation()
+        self.init_semantic_segmentation(segmentation_sensitivity=segmentation_sensitivity)
 
     def init_vertices_polygons(self) -> tuple[
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]],
@@ -288,7 +289,7 @@ class Simulator:
 
         return world_vertices
 
-    def init_semantic_segmentation(self):
+    def init_semantic_segmentation(self, segmentation_sensitivity: float):
         # Create a Cryptomatte node for each object in the scene
         # Combine each Cryptomatte node based on depth
         last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
@@ -306,7 +307,7 @@ class Simulator:
             # Cryptomattes are anti-aliased, so we need to threshold them
             math_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
             math_node.operation = 'GREATER_THAN'
-            math_node.inputs[1].default_value = 0.1
+            math_node.inputs[1].default_value = segmentation_sensitivity
 
             # Apply its id to the cryptomatte mask
             mix_matte_node = self.scene.node_tree.nodes.new(type='CompositorNodeMath')
