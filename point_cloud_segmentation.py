@@ -2,15 +2,49 @@ import cv2
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
+from scipy.spatial import KDTree
 
 from simulator import Simulator
+
+
+def unilateral_chamfer_score(
+        pts1: np.ndarray,
+        pts2: np.ndarray,
+        pts1_labels: np.ndarray,
+        pts2_labels: np.ndarray,
+        dist_thresh: float,
+        visualize: bool = False
+) -> float:
+    kd = KDTree(pts1)
+    dists, nearest_indices = kd.query(pts2)
+    nearest_labels = pts1_labels[nearest_indices]
+    matching_dists = dists < dist_thresh
+    matching_labels = pts2_labels == nearest_labels
+    matching_pts = matching_dists & matching_labels
+    chamfer_score = np.mean(matching_pts)
+
+    if visualize:
+        vis_labels = np.zeros_like(pts2_labels)
+        vis_labels[~matching_dists] = 1
+        vis_labels[~matching_labels] = 2
+        visualize_point_cloud(pts2, vis_labels - 1, 2)
+
+    return chamfer_score.item()
+
+
+def visualize_point_cloud(pts: np.ndarray, pts_labels: np.ndarray, num_labels: int, cmap: str = 'jet'):
+    pcl = o3d.geometry.PointCloud()
+    cmap = plt.get_cmap(cmap)
+    pcl.points = o3d.utility.Vector3dVector(pts)
+    pcl.colors = o3d.utility.Vector3dVector(cmap((pts_labels + 1) / num_labels)[:, :3])
+    o3d.visualization.draw_geometries([pcl])
 
 
 if __name__ == '__main__':
     # Create a simulator
     simulator = Simulator(
-        'construction.blend',
-        points_density=0.0,
+        'test.blend',
+        points_density=100.0,
         segmentation_sensitivity=0.99,
         verbose=True
     )
@@ -56,7 +90,7 @@ if __name__ == '__main__':
         )
 
         # Setup labels for display
-        labels = seg_color_map((labels + 1) / len(simulator.labels))
+        labels = seg_color_map((labels + 1) / simulator.n_labels)[:, :, :3]
 
         # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
@@ -87,10 +121,14 @@ if __name__ == '__main__':
     # Destroy opencv windows
     cv2.destroyAllWindows()
 
-    # Create point cloud
-    point_cloud = o3d.geometry.PointCloud()
-    point_cloud.points = o3d.utility.Vector3dVector(voxels * voxel_size)
-    point_cloud.colors = o3d.utility.Vector3dVector(seg_color_map((voxel_labels + 1) / len(simulator.labels))[:, :3])
+    # Compute estimated point cloud from voxel grid
+    estimated_point_cloud = voxels * voxel_size
 
-    # Visualize point cloud
-    o3d.visualization.draw_geometries([point_cloud])
+    # Visualize estimated point cloud
+    visualize_point_cloud(estimated_point_cloud, voxel_labels, simulator.n_labels, seg_color_map.name)
+
+    # Get simulator ground truth point cloud
+    point_cloud, point_cloud_labels, _ = simulator.get_point_cloud()
+
+    # Visualize ground truth point cloud
+    visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)

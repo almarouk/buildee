@@ -132,8 +132,9 @@ class Simulator:
             (obj, get_label(obj)) for obj in self.objects
         )
         self.labels = list(set(self.object_labels.values()))
+        self.n_labels = len(self.labels)
         if self.verbose:
-            print(f'Found {len(self.labels)} labels: {self.labels}')
+            print(f'Found {self.n_labels} labels: {self.labels}')
         self.init_semantic_segmentation(segmentation_sensitivity=segmentation_sensitivity)
 
     def init_vertices_polygons(self) -> tuple[
@@ -407,9 +408,10 @@ class Simulator:
 
         return world_from_camera
 
-    def get_point_cloud(self, update_mask: bool = True, imshow: bool = False) -> (np.ndarray, np.ndarray):
+    def get_point_cloud(self, update_mask: bool = True, imshow: bool = False) -> (np.ndarray, np.ndarray, np.ndarray):
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
+        point_cloud_labels = np.empty(self.n_points, dtype=np.int32)
         point_cloud_idx = 0
 
         # Iterate over all objects and store their transformed vertices in the point cloud
@@ -424,6 +426,9 @@ class Simulator:
 
             # Store the points in the point cloud and update cloud index
             point_cloud[point_cloud_idx:point_cloud_idx + len(points)] = points
+            point_cloud_labels[point_cloud_idx:point_cloud_idx + len(points)] = self.labels.index(
+                self.object_labels[obj]
+            )
             point_cloud_idx += len(points)
 
         # Set all points as visible
@@ -491,7 +496,7 @@ class Simulator:
             ] = self.point_cloud_colors[mask]
             cv2.imshow(f'points', point_cloud_image)
 
-        return point_cloud, mask
+        return point_cloud, point_cloud_labels, mask
 
     def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
         # Check that there is no collision between current camera and new camera pose
@@ -646,7 +651,7 @@ if __name__ == '__main__':
         )
 
         # Setup segmentation for display
-        seg = seg_color_map((seg + 1) / len(simulator.labels))
+        seg = seg_color_map((seg + 1) / simulator.n_labels)[:, :, :3]
 
         # Show rgb, depth and point cloud
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
