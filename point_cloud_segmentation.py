@@ -38,8 +38,8 @@ def unilateral_chamfer_score(
 
     if visualize:
         vis_labels = np.zeros_like(pts2_labels)
-        vis_labels[~matching_dists] = 1
-        vis_labels[~matching_labels] = 2
+        vis_labels[~matching_labels] = 1
+        vis_labels[~matching_dists] = 2
         visualize_point_cloud(pts2, vis_labels - 1, 2)
 
     return chamfer_score.item()
