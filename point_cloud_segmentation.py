@@ -15,6 +15,19 @@ def unilateral_chamfer_score(
         dist_thresh: float,
         visualize: bool = False
 ) -> float:
+    """Compute the unilateral chamfer score between two point clouds.
+    The chamfer score is the percentage of points in pts2 that:
+    1. Are within dist_thresh of a point in pts1
+    2. Have the same label as the nearest point in pts1
+
+    :param pts1: reference point cloud, shape (N, 3)
+    :param pts2: point cloud to evaluate, shape (M, 3)
+    :param pts1_labels: labels of pts1, shape (N,)
+    :param pts2_labels: labels of pts2, shape (M,)
+    :param dist_thresh: a point in pts2 is considered valid if it is within dist_thresh of a point in pts1
+    :param visualize: 3D visualization of pts2 matching points
+    :return: chamfer score of pts2 w.r.t. pts1
+    """
     kd = KDTree(pts1)
     dists, nearest_indices = kd.query(pts2)
     nearest_labels = pts1_labels[nearest_indices]
@@ -132,3 +145,11 @@ if __name__ == '__main__':
 
     # Visualize ground truth point cloud
     visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)
+
+    # Compute chamfer scores
+    print(unilateral_chamfer_score(
+        point_cloud, estimated_point_cloud, point_cloud_labels, voxel_labels, 0.2, visualize=True
+    ))
+    print(unilateral_chamfer_score(
+        estimated_point_cloud, point_cloud, voxel_labels, point_cloud_labels, 0.2, visualize=True
+    ))
