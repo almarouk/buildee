@@ -242,7 +242,7 @@ class Simulator:
 
     def init_camera_spawn(self) -> np.ndarray:
         # The camera spawn is the camera's initial position
-        world_vertices = np.array(self.camera.location)[None]
+        world_vertices = np.array(self.camera.matrix_world.translation)[None]
 
         # If there is a CameraSpawn object, use it to sample camera spawn points
         if 'CameraSpawn' in self.scene.objects:
@@ -456,7 +456,7 @@ class Simulator:
         )
 
         # Get camera center, origin of raycast
-        origin = self.camera.location
+        origin = self.camera.matrix_world.translation
 
         # Compute dynamic BVH tree
         dynamic_bvh = compute_bvh_tree(self.dynamic_verts_polys)
@@ -501,7 +501,7 @@ class Simulator:
     def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
         # Check that there is no collision between current camera and new camera pose
         if check_collisions:
-            origin = self.camera.location
+            origin = self.camera.matrix_world.translation
             direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
 
             if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
