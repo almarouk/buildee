@@ -141,7 +141,7 @@ if __name__ == '__main__':
     visualize_point_cloud(estimated_point_cloud, voxel_labels, simulator.n_labels, seg_color_map.name)
 
     # Get simulator ground truth point cloud
-    point_cloud, point_cloud_labels, _ = simulator.get_point_cloud()
+    point_cloud, point_cloud_labels, _ = simulator.compute_point_cloud()
 
     # Visualize ground truth point cloud
     visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)

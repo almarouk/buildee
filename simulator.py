@@ -66,39 +66,46 @@ class Simulator:
             )
         ])
 
-        # Get all vertices and polygons for BVH tree for fast point cloud occlusion checking
+        # Get vertices and polygons of each object for point cloud occlusion checking
+        # Static objects and dynamic objects have their own set of vertices and polygons
         self.static_verts_polys, self.dynamic_verts_polys = self.init_vertices_polygons()
+
+        # Get the number of static and dynamic vertices
         self.n_static_vertices = sum(len(vertices) for vertices, _ in self.static_verts_polys.values())
         self.n_dynamic_vertices = sum(len(vertices) for vertices, _ in self.dynamic_verts_polys.values())
         self.n_vertices = self.n_static_vertices + self.n_dynamic_vertices
         if self.verbose:
             print(f'Found {self.n_static_vertices} static vertices and {self.n_dynamic_vertices} dynamic vertices')
 
-        # Get a point cloud representation of every static and dynamic object in the scene
+        # Sample 3D points for every object in the scene
+        # Static objects and dynamic objects have their own set of point clouds
         self.static_point_clouds, self.dynamic_point_clouds = self.init_object_point_clouds(
             points_density=points_density
         )
+
+        # Get the number of static and dynamic points
         self.n_static_points = sum(len(vertices) for vertices in self.static_point_clouds.values())
         self.n_dynamic_points = sum(len(vertices) for vertices in self.dynamic_point_clouds.values())
         self.n_points = self.n_static_points + self.n_dynamic_points
-        self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
+        # self.point_cloud_colors = np.random.randint(0, 256, (self.n_points, 3), dtype=np.uint8)  # rendering colors
         if self.verbose:
             print(f'Extracted {self.n_static_points} static points and {self.n_dynamic_points} dynamic points')
 
-        # Compute the static BVH tree for fast point cloud occlusion checking
+        # Compute a BVH tree for static objects for fast point cloud occlusion checking
+        # Dynamic objects have their own BVH tree that will be computed on the fly
         self.static_bvh = compute_bvh_tree(self.static_verts_polys)
 
-        # Store a mask of the observed 3d points
+        # Store a mask of the observed 3D points
         self.observed_points_mask = np.zeros(self.n_points, dtype=bool)
 
-        # Render the depth in alpha channel
+        # Setup nodes to render depth in the alpha channel
         self.scene.use_nodes = True
         self.scene.view_layers["ViewLayer"].use_pass_z = True
         self.render_node = self.scene.node_tree.nodes["Render Layers"]
         self.output_node = self.scene.node_tree.nodes["Composite"]
         self.scene.node_tree.links.new(self.render_node.outputs['Depth'], self.output_node.inputs['Alpha'])
 
-        # Setup color space
+        # Setup rendering color space
         self.color_node = self.scene.node_tree.nodes.new(type='CompositorNodeConvertColorSpace')
         self.color_node.from_color_space = 'Linear Rec.709'
         self.color_node.to_color_space = 'AgX Base sRGB'
@@ -124,14 +131,28 @@ class Simulator:
         self.matte_output_node.format.color_management = 'OVERRIDE'
         self.matte_output_node.format.linear_colorspace_settings.name = 'Non-Color'
         self.matte_output_node.file_slots[0].path = 'matte'
+
+        # Get object labels based on object names
         self.object_labels = OrderedDict(
             (obj, get_label(obj)) for obj in self.objects
         )
+
+        # Get list of labels from all objects
         self.labels = list(set(self.object_labels.values()))
+
+        # Get number of labels
         self.n_labels = len(self.labels)
         if self.verbose:
             print(f'Found {self.n_labels} labels: {self.labels}')
+
+        # Setup semantic segmentation nodes
         self.init_semantic_segmentation(segmentation_sensitivity=segmentation_sensitivity)
+
+        # Setup colors for point cloud rendering
+        self.point_cloud_colors, _, _ = self.compute_point_cloud(update_mask=False)
+        self.point_cloud_colors -= self.point_cloud_colors.min(axis=0)
+        self.point_cloud_colors /= self.point_cloud_colors.max(axis=0)
+        self.point_cloud_colors = np.uint8(self.point_cloud_colors * 255)
 
     def init_vertices_polygons(self) -> tuple[
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]],
@@ -403,7 +424,11 @@ class Simulator:
 
         return world_from_camera
 
-    def get_point_cloud(self, update_mask: bool = True, imshow: bool = False) -> (np.ndarray, np.ndarray, np.ndarray):
+    def compute_point_cloud(
+            self,
+            update_mask: bool = True,
+            imshow: bool = False
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
         point_cloud_labels = np.empty(self.n_points, dtype=np.int32)
@@ -544,8 +569,8 @@ class Simulator:
     def depth_to_world_points(self, depth: np.ndarray) -> np.ndarray:
         """Unproject depth values to world points given the current camera pose
 
-        :param depth: depth map with shape (h, w).
-        :return: 3D points in world coordinates with shape (h, w, 3).
+        :param depth: depth map with shape (h, w)
+        :return: 3D points in world coordinates with shape (h, w, 3)
         """
         world_from_cam = self.get_world_from_camera()  # get world from camera transformation matrix
         v, u = np.where((0 < depth) & (depth < self.camera.data.clip_end - 1))  # get pixel coordinates at valid depths
@@ -602,7 +627,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('test.blend', points_density=0.0, verbose=True)
+    simulator = Simulator('test.blend', points_density=100.0, verbose=True)
 
     # Spawn the camera at a random position
     # simulator.respawn_camera()
@@ -652,7 +677,7 @@ if __name__ == '__main__':
         cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
         cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(seg * 255), cv2.COLOR_RGB2BGR))
-        # simulator.get_point_cloud(imshow=True)
+        simulator.compute_point_cloud(imshow=True)
 
         # Step to next frame (update animations)
         simulator.step_frame()
