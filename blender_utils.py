@@ -1,9 +1,9 @@
+import re
 from collections import OrderedDict
 
 import bpy
 import mathutils
 import numpy as np
-import re
 
 
 def has_animation_data(obj: bpy.types.Object) -> bool:
@@ -66,3 +66,34 @@ def compute_bvh_tree(
         polygons.extend(polys)
 
     return mathutils.bvhtree.BVHTree.FromPolygons(vertices, polygons, epsilon=0.0)
+
+
+def batch_raycast(
+        origin: mathutils.Vector,
+        points: np.ndarray,
+        ray_directions: np.ndarray,
+        ray_lengths: np.ndarray,
+        static_bvh: mathutils.bvhtree.BVHTree,
+        dynamic_bvh: mathutils.bvhtree.BVHTree
+):
+    """Optimized function to check occlusion using BVH raycasting."""
+    n_pts = len(points)
+    occluded = np.zeros(n_pts, dtype=bool)
+
+    for i in range(n_pts):
+        point = mathutils.Vector(points[i])
+        ray_direction = mathutils.Vector(ray_directions[i])
+        ray_length = ray_lengths[i].item()
+
+        # Check collision with static BVH
+        collision_location, _, _, _ = static_bvh.ray_cast(origin, ray_direction, ray_length)
+        if collision_location and (point - collision_location).length > 0.01:
+            occluded[i] = True
+            continue  # Skip dynamic check if already occluded
+
+        # Check collision with dynamic BVH
+        collision_location, _, _, _ = dynamic_bvh.ray_cast(origin, ray_direction, ray_length)
+        if collision_location and (point - collision_location).length > 0.01:
+            occluded[i] = True
+
+    return occluded

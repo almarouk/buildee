@@ -13,7 +13,8 @@ from blender_utils import (
     is_animated,
     get_visible_objects,
     compute_bvh_tree,
-    get_label
+    get_label,
+    batch_raycast
 )
 from os_utils import suppress_output
 
@@ -584,30 +585,18 @@ class Simulator:
         # Get camera center, origin of raycast
         origin = self.camera.matrix_world.translation
 
+        frustum_indices = np.where(mask)[0]
+        frustum_points = point_cloud[frustum_indices]
+        ray_directions = frustum_points - np.array(origin)
+        ray_lengths = np.linalg.norm(ray_directions, axis=1)
+        ray_directions /= ray_lengths[:, None]
+
         # Compute dynamic BVH tree
         dynamic_bvh = compute_bvh_tree(self.dynamic_verts_polys)
 
-        # Check occlusion for each valid point
-        for idx in np.where(mask)[0]:
+        occluded = batch_raycast(origin, frustum_points, ray_directions, ray_lengths, self.static_bvh, dynamic_bvh)
 
-            point = mathutils.Vector(point_cloud[idx])
-
-            # Compute ray direction, from the camera center to the point
-            ray_direction = point - origin
-
-            # Check collision with both static and dynamic BVH trees
-            for bvh in [self.static_bvh, dynamic_bvh]:
-
-                # Racyast from the camera center to the point
-                collision_location, _, _, _ = bvh.ray_cast(
-                    origin,
-                    ray_direction.normalized(),
-                    ray_direction.length
-                )
-
-                # Filter point if the raycast hit somewhere different from the vertice
-                if (collision_location is not None) and ((point - collision_location).length > 0.01):
-                    mask[idx] = False
+        mask[frustum_indices[occluded]] = False
 
         # Update the observed points mask
         if update_mask:
