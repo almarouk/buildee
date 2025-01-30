@@ -362,6 +362,134 @@ class Simulator:
         # Connect the final ZCombine node to the matte output node
         self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
 
+    def get_camera_matrix(self) -> np.ndarray:
+        image_width = self.scene.render.resolution_x
+        image_height = self.scene.render.resolution_y
+        fixed_size = image_height if self.camera.data.sensor_fit == 'VERTICAL' else image_width
+        f = fixed_size / np.tan(self.camera.data.angle / 2) / 2
+        cx = image_width / 2
+        cy = image_height / 2
+        return np.array([
+            [f, 0, cx],
+            [0, f, cy],
+            [0, 0, 1]
+        ])
+
+    def get_world_from_camera(self) -> np.ndarray:
+        # Read blender camera pose
+        world_from_camera = np.array(self.camera.matrix_world)
+
+        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
+        world_from_camera[:, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
+
+        return world_from_camera
+
+    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
+        # Check that there is no collision between current camera and new camera pose
+        if check_collisions:
+            origin = self.camera.matrix_world.translation
+            direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
+
+            if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
+                collided, collision_location, _, _, _, _ = self.scene.ray_cast(
+                    depsgraph=self.view_layer.depsgraph,
+                    origin=origin,
+                    direction=direction.normalized(),
+                    distance=direction.length + 1e-3  # add a small collision offset
+                )
+                if collided:
+                    if self.verbose:
+                        print('Collision detected, not moving the camera.')
+                    return True  # there was a collision
+
+        # Copy the camera pose
+        world_from_camera = world_from_camera.copy()
+
+        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
+        world_from_camera[:3, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
+
+        # Set the camera pose
+        self.camera.matrix_world = mathutils.Matrix(world_from_camera)
+
+        # There was no collision
+        return False
+
+    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
+        return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
+
+    def move_camera_forward(self, distance: float) -> bool:
+        # Move camera along the z-axis
+        return self.set_camera_from_next_camera(np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, distance],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
+    def move_camera_down(self, distance: float) -> bool:
+        # Move camera along the y-axis
+        return self.set_camera_from_next_camera(np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, distance],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
+    def move_camera_right(self, distance: float) -> bool:
+        # Move camera along the x-axis
+        return self.set_camera_from_next_camera(np.array([
+            [1.0, 0.0, 0.0, distance],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
+    def turn_camera_right(self, angle: float, degrees: bool = True) -> bool:
+        # Convert angle to radians if needed
+        if degrees:
+            angle = np.radians(angle)
+
+        # Rotate camera around the y-axis
+        return self.set_camera_from_next_camera(np.array([
+            [np.cos(angle), 0.0, np.sin(angle), 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-np.sin(angle), 0.0, np.cos(angle), 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ]))
+
+    def step_frame(self):
+        self.scene.frame_set(self.scene.frame_current + 1)
+
+    def respawn_camera(self):
+        # Respawn the camera at a random spawn point
+        x, y, z = self.spawn_points[np.random.randint(len(self.spawn_points))]
+
+        # Set the camera pose
+        self.set_world_from_camera(np.array([
+            [1, 0, 0, x],
+            [0, 0, 1, y],
+            [0, -1, 0, z],
+            [0, 0, 0, 1]
+        ]), check_collisions=False)
+
+        # Randomly rotate the camera around the z-axis
+        self.turn_camera_right(np.random.uniform(0, 2 * np.pi), degrees=False)
+
+    def depth_to_world_points(self, depth: np.ndarray) -> np.ndarray:
+        """Unproject depth values to world points given the current camera pose
+
+        :param depth: depth map with shape (h, w)
+        :return: 3D points in world coordinates with shape (h, w, 3)
+        """
+        world_from_cam = self.get_world_from_camera()  # get world from camera transformation matrix
+        v, u = np.where((0 < depth) & (depth < self.camera.data.clip_end - 1))  # get pixel coordinates at valid depths
+        uvws = np.stack([u + 0.5, v + 0.5, np.ones_like(u)])  # homogeneous pixel coordinates
+        cam_points = np.linalg.inv(self.camera_matrix) @ (depth[v, u] * uvws)  # unproject in camera space
+        world_points = world_from_cam[:3, :3] @ cam_points + world_from_cam[:3, 3:]  # transform to world space
+        points = np.full((*depth.shape, 3), np.nan)  # setup (h, w, 3) array, invalid depths are nan
+        points[v, u] = world_points.T  # store points where depth is valid
+        return points
+
     def render(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         # Mute blender and render the scene
         with suppress_output():
@@ -401,28 +529,6 @@ class Simulator:
         matte_path.unlink()
 
         return rgbd[:, :, :3], rgbd[:, :, 3], matte
-
-    def get_camera_matrix(self) -> np.ndarray:
-        image_width = self.scene.render.resolution_x
-        image_height = self.scene.render.resolution_y
-        fixed_size = image_height if self.camera.data.sensor_fit == 'VERTICAL' else image_width
-        f = fixed_size / np.tan(self.camera.data.angle / 2) / 2
-        cx = image_width / 2
-        cy = image_height / 2
-        return np.array([
-            [f, 0, cx],
-            [0, f, cy],
-            [0, 0, 1]
-        ])
-
-    def get_world_from_camera(self) -> np.ndarray:
-        # Read blender camera pose
-        world_from_camera = np.array(self.camera.matrix_world)
-
-        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
-        world_from_camera[:, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
-
-        return world_from_camera
 
     def compute_point_cloud(
             self,
@@ -518,112 +624,6 @@ class Simulator:
 
         return point_cloud, point_cloud_labels, mask
 
-    def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
-        # Check that there is no collision between current camera and new camera pose
-        if check_collisions:
-            origin = self.camera.matrix_world.translation
-            direction = mathutils.Vector(world_from_camera[:3, 3]) - origin
-
-            if direction.length > 1e-8:  # do not move camera if we check for collisions but the distance is too small
-                collided, collision_location, _, _, _, _ = self.scene.ray_cast(
-                    depsgraph=self.view_layer.depsgraph,
-                    origin=origin,
-                    direction=direction.normalized(),
-                    distance=direction.length + 1e-3  # add a small collision offset
-                )
-                if collided:
-                    if self.verbose:
-                        print('Collision detected, not moving the camera.')
-                    return True  # there was a collision
-
-        # Copy the camera pose
-        world_from_camera = world_from_camera.copy()
-
-        # Rotate the camera 180 degrees around the x-axis to fit blender's camera coordinate system
-        world_from_camera[:3, 1:3] *= -1  # same as doing world_from_camera @ R(180, x)
-
-        # Set the camera pose
-        self.camera.matrix_world = mathutils.Matrix(world_from_camera)
-
-        # There was no collision
-        return False
-
-    def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
-        return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
-
-    def respawn_camera(self):
-        # Respawn the camera at a random spawn point
-        x, y, z = self.spawn_points[np.random.randint(len(self.spawn_points))]
-
-        # Set the camera pose
-        self.set_world_from_camera(np.array([
-            [1, 0, 0, x],
-            [0, 0, 1, y],
-            [0, -1, 0, z],
-            [0, 0, 0, 1]
-        ]), check_collisions=False)
-
-        # Randomly rotate the camera around the z-axis
-        self.rotate_camera_yaw(np.random.uniform(0, 2 * np.pi), degrees=False)
-
-    def depth_to_world_points(self, depth: np.ndarray) -> np.ndarray:
-        """Unproject depth values to world points given the current camera pose
-
-        :param depth: depth map with shape (h, w)
-        :return: 3D points in world coordinates with shape (h, w, 3)
-        """
-        world_from_cam = self.get_world_from_camera()  # get world from camera transformation matrix
-        v, u = np.where((0 < depth) & (depth < self.camera.data.clip_end - 1))  # get pixel coordinates at valid depths
-        uvws = np.stack([u + 0.5, v + 0.5, np.ones_like(u)])  # homogeneous pixel coordinates
-        cam_points = np.linalg.inv(self.camera_matrix) @ (depth[v, u] * uvws)  # unproject in camera space
-        world_points = world_from_cam[:3, :3] @ cam_points + world_from_cam[:3, 3:]  # transform to world space
-        points = np.full((*depth.shape, 3), np.nan)  # setup (h, w, 3) array, invalid depths are nan
-        points[v, u] = world_points.T  # store points where depth is valid
-        return points
-
-    def move_camera_forward(self, distance: float) -> bool:
-        # Move camera along the z-axis
-        return self.set_camera_from_next_camera(np.array([
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, distance],
-            [0.0, 0.0, 0.0, 1.0]
-        ]))
-
-    def move_camera_right(self, distance: float) -> bool:
-        # Move camera along the x-axis
-        return self.set_camera_from_next_camera(np.array([
-            [1.0, 0.0, 0.0, distance],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0]
-        ]))
-
-    def move_camera_down(self, distance: float) -> bool:
-        # Move camera along the y-axis
-        return self.set_camera_from_next_camera(np.array([
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, distance],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0]
-        ]))
-
-    def rotate_camera_yaw(self, angle: float, degrees: bool = True) -> bool:
-        # Convert angle to radians if needed
-        if degrees:
-            angle = np.radians(angle)
-
-        # Rotate camera around the y-axis
-        return self.set_camera_from_next_camera(np.array([
-            [np.cos(angle), 0.0, np.sin(angle), 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [-np.sin(angle), 0.0, np.cos(angle), 0.0],
-            [0.0, 0.0, 0.0, 1.0]
-        ]))
-
-    def step_frame(self):
-        self.scene.frame_set(self.scene.frame_current + 1)
-
 
 if __name__ == '__main__':
     # Create a simulator
@@ -656,9 +656,9 @@ if __name__ == '__main__':
         elif key == ord('c'):
             simulator.move_camera_down(1)
         elif key == ord('a'):
-            simulator.rotate_camera_yaw(-22.5, degrees=True)
+            simulator.turn_camera_right(-22.5, degrees=True)
         elif key == ord('e'):
-            simulator.rotate_camera_yaw(22.5, degrees=True)
+            simulator.turn_camera_right(22.5, degrees=True)
         elif key == 27:  # escape key
             break
 

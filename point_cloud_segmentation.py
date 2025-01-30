@@ -127,9 +127,9 @@ if __name__ == '__main__':
             case 5:
                 simulator.move_camera_right(-1)
             case 6:
-                simulator.rotate_camera_yaw(22.5, degrees=True)
+                simulator.turn_camera_right(22.5, degrees=True)
             case 7:
-                simulator.rotate_camera_yaw(-22.5, degrees=True)
+                simulator.turn_camera_right(-22.5, degrees=True)
 
     # Destroy opencv windows
     cv2.destroyAllWindows()
