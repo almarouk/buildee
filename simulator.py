@@ -15,7 +15,7 @@ from blender_utils import (
     compute_bvh_tree,
     get_label
 )
-from os_utils import redirect_output_to_null, restore_output
+from os_utils import suppress_output
 
 
 class Simulator:
@@ -31,11 +31,7 @@ class Simulator:
         self.verbose = verbose
 
         # Load blender file
-        if not self.verbose:
-            devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
-            bpy.ops.wm.open_mainfile(filepath=str(blend_file))
-            restore_output(devnull, original_stdout, original_stderr)  # restore print output
-        else:
+        with suppress_output(self.verbose):
             bpy.ops.wm.open_mainfile(filepath=str(blend_file))
 
         # Get the current scene
@@ -347,9 +343,8 @@ class Simulator:
 
     def render(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         # Mute blender and render the scene
-        devnull, original_stdout, original_stderr = redirect_output_to_null()  # redirect print output
-        bpy.ops.render.render(write_still=True)  # render the scene
-        restore_output(devnull, original_stdout, original_stderr)  # restore print output
+        with suppress_output():
+            bpy.ops.render.render(write_still=True)
 
         # Load the image
         render = bpy.data.images.load(str(self.render_path))
@@ -607,7 +602,7 @@ class Simulator:
 
 if __name__ == '__main__':
     # Create a simulator
-    simulator = Simulator('construction.blend', points_density=0.0, verbose=True)
+    simulator = Simulator('test.blend', points_density=0.0, verbose=True)
 
     # Spawn the camera at a random position
     # simulator.respawn_camera()
