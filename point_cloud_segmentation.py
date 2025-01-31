@@ -26,7 +26,7 @@ def unilateral_chamfer_score(
     :param pts2_labels: labels of pts2, shape (M,)
     :param dist_thresh: a point in pts2 is considered valid if it is within dist_thresh of a point in pts1
     :param visualize: 3D visualization of pts2 matching points
-    :return: chamfer score of pts2 w.r.t. pts1
+    :return: chamfer score of ``pts2`` w.r.t. ``pts1``
     """
     kd = KDTree(pts1)
     dists, nearest_indices = kd.query(pts2)

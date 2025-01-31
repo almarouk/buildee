@@ -27,6 +27,14 @@ class Simulator:
             filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
             verbose: bool = False
     ):
+        """Initialize the simulator.
+
+        :param blend_file: path to the blender file
+        :param points_density: density of 3D points to sample per unit area
+        :param segmentation_sensitivity: border sensitivity for segmentation masks, higher values discard aliased edges
+        :param filter_object_names: list of object names to ignore for 3D points sampling and semantic segmentation
+        :param verbose: if True, print debug information
+        """
         # Set verbose mode
         self.verbose = verbose
 
@@ -158,7 +166,7 @@ class Simulator:
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]],
         OrderedDict[bpy.types.Object, tuple[np.ndarray, list[list[int]]]]
     ]:
-        # Get vertices and polygons indices for every object in the scene
+        """Get vertices and polygons indices for every object in the scene."""
         static_verts_polys, dynamic_verts_polys = OrderedDict(), OrderedDict()
         progress_bar = tqdm.tqdm(total=len(self.objects), desc='BVH', disable=not self.verbose)
 
@@ -203,6 +211,10 @@ class Simulator:
     def init_object_point_clouds(
             self, points_density: float
     ) -> tuple[OrderedDict[bpy.types.Object, np.ndarray], OrderedDict[bpy.types.Object, np.ndarray]]:
+        """Sample 3D points for every object in the scene.
+
+        :param points_density: density of points to sample per unit area
+        """
         # Initialize point cloud geometry node
         pcl_node = bpy.data.node_groups.new(name="Pointcloud", type='GeometryNodeTree')
         pcl_input_node = pcl_node.nodes.new(type='NodeGroupInput')
@@ -258,6 +270,7 @@ class Simulator:
         return static_point_clouds, dynamic_point_clouds
 
     def init_camera_spawn(self) -> np.ndarray:
+        """Sample camera spawn points from the CameraSpawn object or use the camera's initial position."""
         # The camera spawn is the camera's initial position
         world_vertices = np.array(self.camera.matrix_world.translation)[None]
 
@@ -308,6 +321,10 @@ class Simulator:
         return world_vertices
 
     def init_semantic_segmentation(self, segmentation_sensitivity: float):
+        """Setup semantic segmentation nodes for the scene.
+
+        :param segmentation_sensitivity: border sensitivity for segmentation masks, higher values discard aliased edges
+        """
         # Create a Cryptomatte node for each object in the scene
         # Combine each Cryptomatte node based on depth
         last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
@@ -363,6 +380,7 @@ class Simulator:
         self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
 
     def get_camera_matrix(self) -> np.ndarray:
+        """Get the camera matrix from the current camera parameters."""
         image_width = self.scene.render.resolution_x
         image_height = self.scene.render.resolution_y
         fixed_size = image_height if self.camera.data.sensor_fit == 'VERTICAL' else image_width
@@ -376,6 +394,7 @@ class Simulator:
         ])
 
     def get_world_from_camera(self) -> np.ndarray:
+        """Get the transformation matrix from world to camera coordinates."""
         # Read blender camera pose
         world_from_camera = np.array(self.camera.matrix_world)
 
@@ -385,6 +404,12 @@ class Simulator:
         return world_from_camera
 
     def set_world_from_camera(self, world_from_camera: np.ndarray, check_collisions: bool = True) -> bool:
+        """Set the camera pose from a transformation matrix.
+
+        :param world_from_camera: transformation matrix from world to camera coordinates
+        :param check_collisions: check for collisions with objects in the scene
+        :return: True if ``check_collisions`` were enabled and there was a collision, False otherwise
+        """
         # Check that there is no collision between current camera and new camera pose
         if check_collisions:
             origin = self.camera.matrix_world.translation
@@ -415,9 +440,20 @@ class Simulator:
         return False
 
     def set_camera_from_next_camera(self, camera_from_next_camera: np.ndarray) -> bool:
+        """Set the camera pose from a transformation matrix relative to the current camera pose. Also checks
+        for collisions with objects in the scene. Camera does not move if there is a collision.
+
+        :param camera_from_next_camera: transformation matrix from camera to next camera coordinates
+        :return: True if there was a collision, False otherwise
+        """
         return self.set_world_from_camera(self.get_world_from_camera() @ camera_from_next_camera)
 
     def move_camera_forward(self, distance: float) -> bool:
+        """Move the camera along its z-axis and check for collisions.
+
+        :param distance: distance to move the camera
+        :return: True if there was a collision, False otherwise
+        """
         # Move camera along the z-axis
         return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, 0.0],
@@ -427,6 +463,11 @@ class Simulator:
         ]))
 
     def move_camera_down(self, distance: float) -> bool:
+        """Move the camera along its y-axis and check for collisions.
+
+        :param distance: distance to move the camera
+        :return: True if there was a collision, False otherwise
+        """
         # Move camera along the y-axis
         return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, 0.0],
@@ -436,6 +477,11 @@ class Simulator:
         ]))
 
     def move_camera_right(self, distance: float) -> bool:
+        """Move the camera along its x-axis and check for collisions.
+
+        :param distance: distance to move the camera
+        :return: True if there was a collision, False otherwise
+        """
         # Move camera along the x-axis
         return self.set_camera_from_next_camera(np.array([
             [1.0, 0.0, 0.0, distance],
@@ -445,6 +491,12 @@ class Simulator:
         ]))
 
     def turn_camera_right(self, angle: float, degrees: bool = True) -> bool:
+        """Rotate the camera along its y-axis and check for collisions.
+
+        :param angle: angle to rotate the camera
+        :param degrees: if True, angle is in degrees, otherwise in radians
+        :return: True if there was a collision, False otherwise
+        """
         # Convert angle to radians if needed
         if degrees:
             angle = np.radians(angle)
@@ -458,9 +510,11 @@ class Simulator:
         ]))
 
     def step_frame(self):
+        """Increment simulation frame."""
         self.scene.frame_set(self.scene.frame_current + 1)
 
     def respawn_camera(self):
+        """Respawn the camera at a random spawn point and randomly rotate the camera around its y-axis."""
         # Respawn the camera at a random spawn point
         x, y, z = self.spawn_points[np.random.randint(len(self.spawn_points))]
 
@@ -476,7 +530,7 @@ class Simulator:
         self.turn_camera_right(np.random.uniform(0, 2 * np.pi), degrees=False)
 
     def depth_to_world_points(self, depth: np.ndarray) -> np.ndarray:
-        """Unproject depth values to world points given the current camera pose
+        """Unproject depth map to world points given the current camera pose.
 
         :param depth: depth map with shape (h, w)
         :return: 3D points in world coordinates with shape (h, w, 3)
@@ -491,6 +545,13 @@ class Simulator:
         return points
 
     def render(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Render the scene given current render settings and scene parameters. Returns the rendered RGB image,
+        the corresponding depth map and the semantic segmentation map. The semantic segmentation map indicates
+        the label id of each pixel in the image. Label ids correspond to their position in ``Simulator.labels``.
+        Pixels with no labels are assigned -1.
+
+        :return: RGB image, depth map, semantic segmentation map
+        """
         # Mute blender and render the scene
         with suppress_output():
             bpy.ops.render.render(write_still=True)
@@ -535,6 +596,13 @@ class Simulator:
             update_mask: bool = True,
             imshow: bool = False
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Get the sampled point cloud of the scene at the current frame. Returns the point cloud in world coordinates,
+        the corresponding labels for each point and a mask indicating which points are visible in the rendered image.
+
+        :param update_mask: whether to update the simulator's observed points mask
+        :param imshow: whether to show an image of the point cloud in the current view
+        :return: point cloud, point cloud labels, mask indicating visible points
+        """
         # Store all the points in a single point cloud
         point_cloud = np.empty((self.n_points, 3))
         point_cloud_labels = np.empty(self.n_points, dtype=np.int32)
