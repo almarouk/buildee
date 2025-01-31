@@ -1,3 +1,4 @@
+import argparse
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
@@ -693,22 +694,34 @@ class Simulator:
         return point_cloud, point_cloud_labels, mask
 
 
-if __name__ == '__main__':
+def explore(
+        blend_file: str | Path,
+        points_density: float = 1.0,
+        segmentation_sensitivity: float = 0.1,
+        filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
+        max_depth_distance_display: float = 10.0,
+        verbose: bool = False
+):
+    """Explore the 3D scene."""
     # Create a simulator
-    simulator = Simulator('test.blend', points_density=100.0, verbose=True)
-
-    # Spawn the camera at a random position
-    # simulator.respawn_camera()
+    simulator = Simulator(
+        blend_file=blend_file,
+        points_density=points_density,
+        segmentation_sensitivity=segmentation_sensitivity,
+        filter_object_names=filter_object_names,
+        verbose=verbose
+    )
 
     # Setup depth colormap
     depth_color_map = plt.get_cmap('magma')
-    max_depth_distance_display = 10.0
 
     # Setup segmentation colormap
     seg_color_map = plt.get_cmap('jet')
 
+    # Main loop
     for _ in tqdm.tqdm(range(999999999)):
 
+        # Get key pressed
         key = cv2.waitKeyEx(7)
 
         if key == ord('q'):
@@ -751,3 +764,33 @@ if __name__ == '__main__':
         simulator.step_frame()
 
     cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Explore a Blender 3D scene.')
+    parser.add_argument('--blend-file', type=str, required=True, help='path to the blender file')
+    parser.add_argument(
+        '--points-density', type=float, default=1.0, help='density of 3D points to sample per unit area'
+    )
+    parser.add_argument(
+        '--segmentation-sensitivity', type=float, default=0.1,
+        help='border sensitivity for segmentation masks, higher values discard aliased edges'
+    )
+    parser.add_argument(
+        '--filter-object-names', type=str, nargs='+', default=('CameraBounds', 'CameraSpawn'),
+        help='list of object names to ignore for 3D points sampling and semantic segmentation'
+    )
+    parser.add_argument(
+        '--max-depth-distance_display', type=float, default=10.0,
+        help='maximum depth distance to display'
+    )
+    parser.add_argument('--verbose', action='store_true', help='print debug information')
+    args = parser.parse_args()
+    explore(
+        blend_file=args.blend_file,
+        points_density=args.points_density,
+        segmentation_sensitivity=args.segmentation_sensitivity,
+        filter_object_names=args.filter_object_names,
+        max_depth_distance_display=args.max_depth_distance_display,
+        verbose=args.verbose
+    )
