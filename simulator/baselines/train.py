@@ -1,8 +1,7 @@
 import os.path
 from pathlib import Path
 
-from simulator import Simulator
-from model import TimeSformerExtractor
+from ..simulator import Simulator
 
 import cv2
 import gymnasium as gym
@@ -38,7 +37,7 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Define image observation space
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 8, 224, 224), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
 
         # Define action space: xyz and yaw
         self.action_space = gym.spaces.Discrete(8)
@@ -46,18 +45,14 @@ class SimulatorEnv(gym.Env):
         # Whether to display rendered image during training
         self.show_rgb = show_rgb
 
-        # Setup frame observations indices
-        self.frame_indices = np.int64(np.round(np.logspace(0, np.log10(max_steps * 2 / 3), 7))).tolist()
-
         # Initialize simulator, previous observations and previous observed points mask
         self.simulator = None
-        self.prev_obs = []
         self.prev_observed_points_mask = None
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
         # Load a random scene
         blend_file = np.random.choice(list(self.blend_dir.glob('*.blend')))
-        self.simulator = Simulator(blend_file, points_density=100.0)
+        self.simulator = Simulator(blend_file, points_density=100.0, verbose=True)
 
         # Reset current step
         self.current_step = 0
@@ -67,17 +62,12 @@ class SimulatorEnv(gym.Env):
 
         # Render image and update point cloud
         image = self.render_image()
-        self.simulator.get_point_cloud(update_mask=True)
-
-        # Build observations based on rendered image
-        observations = np.zeros((3, 8, 224, 224), dtype=np.uint8)
-        observations[:, 0] = image
+        self.simulator.compute_point_cloud(update_mask=True)
 
         # Setup previous observations and observed points mask
-        self.prev_obs = [image]
         self.prev_observed_points_mask = self.simulator.observed_points_mask.copy()
 
-        return observations, {}
+        return image, {}
 
     def step(
             self, action: gym.core.ActType
@@ -100,25 +90,15 @@ class SimulatorEnv(gym.Env):
             case 5:
                 collided = self.simulator.move_camera_right(-1)
             case 6:
-                collided = self.simulator.rotate_camera_yaw(22.5, degrees=True)
+                collided = self.simulator.turn_camera_right(22.5, degrees=True)
             case 7:
-                collided = self.simulator.rotate_camera_yaw(-22.5, degrees=True)
+                collided = self.simulator.turn_camera_right(-22.5, degrees=True)
             case _:
                 raise ValueError(f'Invalid action: {action}')
 
         # Render image and update point cloud
         image = self.render_image()
-        self.simulator.get_point_cloud(update_mask=True)
-
-        # Build observations based on last 8 frames
-        observations = np.zeros((3, 8, 224, 224), dtype=np.uint8)
-        observations[:, 0] = image
-        for i, frame_idx in enumerate(self.frame_indices):
-            if frame_idx <= len(self.prev_obs):
-                observations[:, i + 1] = self.prev_obs[-frame_idx]
-
-        # Update previous observations
-        self.prev_obs.append(image)
+        self.simulator.compute_point_cloud(update_mask=True, imshow=True)
 
         # Display rendered image
         if self.show_rgb:
@@ -137,10 +117,10 @@ class SimulatorEnv(gym.Env):
             terminated = True
             reward = self.simulator.observed_points_mask.mean() * self.max_steps
 
-        return observations, reward, terminated, False, {}
+        return image, reward, terminated, False, {}
 
     def render_image(self):
-        rgb, depth = self.simulator.render()
+        rgb, depth, _ = self.simulator.render()
         rgb = np.ascontiguousarray(np.moveaxis(rgb, 2, 0) * 255).astype(np.uint8)
         return rgb
 
@@ -153,24 +133,17 @@ class SimulatorEnv(gym.Env):
 
 if __name__ == "__main__":
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=False)
+    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=True)
     logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
     checkpointer = CheckpointCallback(save_freq=1000, save_path='checkpoint', verbose=1)
 
-    # Setup policy
-    policy_kwargs = {
-        'features_extractor_class': TimeSformerExtractor,
-        'features_extractor_kwargs': {'features_dim': 256},
-    }
-
     # Load or create model
     if os.path.exists('checkpoint.zip'):
-        model = PPO.load('checkpoint', env=env, policy_kwargs=policy_kwargs, verbose=1)
+        model = PPO.load('checkpoint', env=env, verbose=1)
     else:
         model = PPO(
             'CnnPolicy',
             env,
-            policy_kwargs=policy_kwargs,
             verbose=1
         )
 

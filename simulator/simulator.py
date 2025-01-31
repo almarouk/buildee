@@ -10,13 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 
-from blender_utils import (
+from .blender_utils import (
     is_animated,
     get_visible_objects,
     compute_bvh_tree,
     get_label
 )
-from os_utils import suppress_output
+from .os_utils import suppress_output
 
 
 class Simulator:
@@ -516,7 +516,7 @@ class Simulator:
 
     def respawn_camera(self):
         """Respawn the camera at a random spawn point and randomly rotate the camera around its y-axis."""
-        # Respawn the camera at a random spawn point
+        # Get random spawn point
         x, y, z = self.spawn_points[np.random.randint(len(self.spawn_points))]
 
         # Set the camera pose

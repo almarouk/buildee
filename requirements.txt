@@ -5,3 +5,4 @@ gymnasium
 stable-baselines3
 open3d
 scipy
+tensorboard

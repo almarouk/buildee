@@ -4,7 +4,7 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 from scipy.spatial import KDTree
 
-from simulator import Simulator
+from ..simulator import Simulator
 
 
 def unilateral_chamfer_score(
