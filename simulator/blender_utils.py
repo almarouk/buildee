@@ -66,3 +66,22 @@ def compute_bvh_tree(
         polygons.extend(polys)
 
     return mathutils.bvhtree.BVHTree.FromPolygons(vertices, polygons, epsilon=0.0)
+
+
+def deselect_all(view_layer: bpy.types.ViewLayer):
+    # Deselect all
+    bpy.ops.object.select_all(action='DESELECT')
+
+    # Set the active object to None
+    view_layer.objects.active = None
+
+
+def select_object(obj: bpy.types.Object, view_layer: bpy.types.ViewLayer):
+    # Deselect all
+    deselect_all(view_layer)
+
+    # Select the object
+    obj.select_set(True)
+
+    # Set the active object
+    view_layer.objects.active = obj

@@ -14,7 +14,9 @@ from .blender_utils import (
     is_animated,
     get_visible_objects,
     compute_bvh_tree,
-    get_label
+    get_label,
+    deselect_all,
+    select_object
 )
 from .os_utils import suppress_output
 
@@ -25,7 +27,8 @@ class Simulator:
             blend_file: str | Path,
             points_density: float = 1.0,
             segmentation_sensitivity: float = 0.1,
-            filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
+            geometry_nodes_objects: list[str] = ('Generator',),
+            filter_object_names: list[str] = ('CameraBounds',),
             verbose: bool = False
     ):
         """Initialize the simulator.
@@ -63,6 +66,9 @@ class Simulator:
 
         # Get camera matrix
         self.camera_matrix = self.get_camera_matrix()
+
+        # Instantiate geometry nodes
+        self.init_geometry_nodes(geometry_nodes_objects)
 
         # Get camera spawn points:
         self.spawn_points = self.init_camera_spawn()
@@ -270,6 +276,18 @@ class Simulator:
 
         return static_point_clouds, dynamic_point_clouds
 
+    def init_geometry_nodes(self, geometry_nodes_objects: list[str]):
+        """Initialize geometry nodes for the scene."""
+        print('Convert geometry nodes to meshes...')
+        for obj_name in geometry_nodes_objects:
+            if obj_name in self.scene.objects:
+                obj = self.scene.objects[obj_name]
+                select_object(obj, self.view_layer)
+                bpy.ops.object.duplicates_make_real()
+                select_object(obj, self.view_layer)
+                bpy.ops.object.convert(target='MESH')
+                deselect_all(self.view_layer)
+
     def init_camera_spawn(self) -> np.ndarray:
         """Sample camera spawn points from the CameraSpawn object or use the camera's initial position."""
         # The camera spawn is the camera's initial position
@@ -331,6 +349,9 @@ class Simulator:
         last_zcombine_node = self.scene.node_tree.nodes.new(type='CompositorNodeZcombine')
         last_zcombine_node.use_antialias_z = False
 
+        # Create a progress bar
+        progress_bar = tqdm.tqdm(total=len(self.object_labels), desc='Cryptomattes', disable=not self.verbose)
+
         # For each object, add a Cryptomatte node and merge it with the Cryptomatte node of the previous object
         for obj_id, (obj, obj_label) in enumerate(self.object_labels.items()):
             # Get label id
@@ -376,6 +397,10 @@ class Simulator:
                 self.scene.node_tree.links.new(mix_matte_node.outputs['Value'], zcombine_node.inputs[2])
                 self.scene.node_tree.links.new(mix_depth_node.outputs['Image'], zcombine_node.inputs[3])
                 last_zcombine_node = zcombine_node
+
+            # Update progress bar
+            progress_bar.set_postfix_str(obj.name)
+            progress_bar.update()
 
         # Connect the final ZCombine node to the matte output node
         self.scene.node_tree.links.new(last_zcombine_node.outputs['Image'], self.matte_output_node.inputs['Image'])
