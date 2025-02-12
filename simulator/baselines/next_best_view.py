@@ -1,3 +1,4 @@
+import argparse
 import os.path
 from pathlib import Path
 
@@ -58,7 +59,7 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Set initial camera pose
-        self.simulator.respawn_camera()
+        # self.simulator.respawn_camera()
 
         # Render image and update point cloud
         image = self.render_image()
@@ -131,22 +132,53 @@ class SimulatorEnv(gym.Env):
         return coverage_gain
 
 
-if __name__ == "__main__":
+def load_model(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False) -> tuple[PPO, CheckpointCallback]:
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_dir=Path('/home/clementin/Data/blendernbv/'), show_rgb=True)
-    logger = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
-    checkpointer = CheckpointCallback(save_freq=1000, save_path='checkpoint', verbose=1)
+    env = SimulatorEnv(blend_dir=blend_dir, show_rgb=show_rgb)
+    lgr = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
+    checkpointer = CheckpointCallback(save_freq=1000, save_path=os.path.splitext(checkpoint_path)[0], verbose=1)
 
     # Load or create model
-    if os.path.exists('checkpoint.zip'):
-        model = PPO.load('checkpoint', env=env, verbose=1)
+    if os.path.exists(checkpoint_path):
+        print(f'Loading model from {checkpoint_path}')
+        model = PPO.load(checkpoint_path, env=env, verbose=1)
     else:
+        print('Creating new model')
         model = PPO(
             'CnnPolicy',
             env,
             verbose=1
         )
 
+    # Set logger
+    model.set_logger(lgr)
+
+    return model, checkpointer
+
+
+def main(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False):
+    # Load model and checkpointer
+    model, checkpointer = load_model(
+        blend_dir=blend_dir,
+        checkpoint_path=checkpoint_path,
+        show_rgb=show_rgb
+    )
+
     # Train model
-    model.set_logger(logger)
     model.learn(total_timesteps=10000000, callback=checkpointer)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Explore a Blender 3D scene.')
+    parser.add_argument('--blend-dir', type=Path, required=True,
+                        help='path to the directory containing Blender scenes')
+    parser.add_argument(
+        '--checkpoint-path', type=str, default='checkpoint.zip', help='path to the .zip checkpoint file'
+    )
+    parser.add_argument('--show-rgb', action='store_true', help='whether to display the rendered image')
+    args = parser.parse_args()
+    main(
+        blend_dir=args.blend_dir,
+        checkpoint_path=args.checkpoint_path,
+        show_rgb=args.show_rgb
+    )
