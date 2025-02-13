@@ -1,7 +1,10 @@
+import argparse
+
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
-import matplotlib.pyplot as plt
+import tqdm
 from scipy.spatial import KDTree
 
 from ..simulator import Simulator
@@ -16,16 +19,16 @@ def unilateral_chamfer_score(
         visualize: bool = False
 ) -> float:
     """Compute the unilateral chamfer score between two point clouds.
-    The chamfer score is the percentage of points in pts2 that:
-    1. Are within dist_thresh of a point in pts1
-    2. Have the same label as the nearest point in pts1
+    The chamfer score is the percentage of points in ``pts2`` that:
+    1) are within ``dist_thresh`` of a point in ``pts1``;
+    2) have the same label as the nearest point in ``pts1``.
 
     :param pts1: reference point cloud, shape (N, 3)
     :param pts2: point cloud to evaluate, shape (M, 3)
-    :param pts1_labels: labels of pts1, shape (N,)
-    :param pts2_labels: labels of pts2, shape (M,)
-    :param dist_thresh: a point in pts2 is considered valid if it is within dist_thresh of a point in pts1
-    :param visualize: 3D visualization of pts2 matching points
+    :param pts1_labels: labels of ``pts1``, shape (N,)
+    :param pts2_labels: labels of ``pts2``, shape (M,)
+    :param dist_thresh: a point in ``pts2`` is considered valid if it is within ``dist_thresh`` of a point in ``pts1``
+    :param visualize: 3D visualization of ``pts2`` matching points
     :return: chamfer score of ``pts2`` w.r.t. ``pts1``
     """
     kd = KDTree(pts1)
@@ -46,6 +49,13 @@ def unilateral_chamfer_score(
 
 
 def visualize_point_cloud(pts: np.ndarray, pts_labels: np.ndarray, num_labels: int, cmap: str = 'jet'):
+    """Visualize a point cloud with labels using Open3D.
+
+    :param pts: point cloud, shape (N, 3)
+    :param pts_labels: labels of points, shape (N,)
+    :param num_labels: number of unique labels
+    :param cmap: colormap to use for labels
+    """
     pcl = o3d.geometry.PointCloud()
     cmap = plt.get_cmap(cmap)
     pcl.points = o3d.utility.Vector3dVector(pts)
@@ -53,34 +63,35 @@ def visualize_point_cloud(pts: np.ndarray, pts_labels: np.ndarray, num_labels: i
     o3d.visualization.draw_geometries([pcl])
 
 
-if __name__ == '__main__':
+def random_walk(
+        blend_file: str,
+        points_density: float = 100.0,
+        voxel_size: float = 0.1,
+        num_steps: int = 100,
+        visualize: bool = False
+):
     # Create a simulator
     simulator = Simulator(
-        'test.blend',
-        points_density=100.0,
+        blend_file,
+        points_density=points_density,
         segmentation_sensitivity=0.99,
         verbose=True
     )
 
-    # Setup depth colormap for display
-    depth_color_map = plt.get_cmap('magma')
-    max_depth_distance_display = 10.0
-
     # Setup labels colormap for display
     seg_color_map = plt.get_cmap('jet')
-
-    # Setup voxel size
-    voxel_size = 0.1
 
     # Initialize voxel grid and labels
     voxels = np.zeros((0, 3), dtype=np.int32)
     voxel_labels = np.zeros(0, dtype=np.int32)
 
-    for _ in range(100):
+    print('Start random walk')
+
+    for _ in tqdm.tqdm(range(num_steps)):
         # Render image
         rgb, depth, labels = simulator.render()
 
-        # Unproject depth to world points
+        # Unproject depth to 3D world points
         world_points = simulator.depth_to_world_points(depth=depth)
 
         # Get indices of valid points and known labels
@@ -97,21 +108,17 @@ if __name__ == '__main__':
         voxels, idxs = np.unique(voxels, return_index=True, axis=0)
         voxel_labels = voxel_labels[idxs]
 
-        # Setup depth for display
-        depth = depth_color_map(
-            depth.clip(0, max_depth_distance_display) / max_depth_distance_display
-        )
+        # Visualize render
+        if visualize:
+            # Setup labels for display
+            labels = seg_color_map((labels + 1) / simulator.n_labels)[:, :, :3]
 
-        # Setup labels for display
-        labels = seg_color_map((labels + 1) / simulator.n_labels)[:, :, :3]
+            # Show rgb and segmentation map
+            cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
+            cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(labels * 255), cv2.COLOR_RGB2BGR))
+            cv2.waitKey(7)
 
-        # Show rgb, depth and point cloud
-        cv2.imshow(f'rgb', cv2.cvtColor(np.uint8(rgb * 255), cv2.COLOR_RGB2BGR))
-        cv2.imshow(f'depth', cv2.cvtColor(np.uint8(depth * 255), cv2.COLOR_RGB2BGR))
-        cv2.imshow(f'segmentation', cv2.cvtColor(np.uint8(labels * 255), cv2.COLOR_RGB2BGR))
-        cv2.waitKey(7)
-
-        # Move camera randomly
+        # Move camera in a random direction
         action = np.random.randint(8)
         match action:
             case 0:
@@ -132,24 +139,56 @@ if __name__ == '__main__':
                 simulator.turn_camera_right(-22.5, degrees=True)
 
     # Destroy opencv windows
-    cv2.destroyAllWindows()
+    if visualize:
+        cv2.destroyAllWindows()
 
     # Compute estimated point cloud from voxel grid
     estimated_point_cloud = voxels * voxel_size
 
     # Visualize estimated point cloud
-    visualize_point_cloud(estimated_point_cloud, voxel_labels, simulator.n_labels, seg_color_map.name)
+    if visualize:
+        visualize_point_cloud(estimated_point_cloud, voxel_labels, simulator.n_labels, seg_color_map.name)
 
     # Get simulator ground truth point cloud
     point_cloud, point_cloud_labels, _ = simulator.compute_point_cloud()
 
     # Visualize ground truth point cloud
-    visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)
+    if visualize:
+        visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)
 
     # Compute chamfer scores
-    print(unilateral_chamfer_score(
-        point_cloud, estimated_point_cloud, point_cloud_labels, voxel_labels, 0.2, visualize=True
+    print('Chamfer score - estimated points to ground truth points:', unilateral_chamfer_score(
+        point_cloud, estimated_point_cloud, point_cloud_labels, voxel_labels, 0.2, visualize=visualize
     ))
-    print(unilateral_chamfer_score(
-        estimated_point_cloud, point_cloud, voxel_labels, point_cloud_labels, 0.2, visualize=True
+    print('Chamfer score - ground truth points to estimated points:', unilateral_chamfer_score(
+        estimated_point_cloud, point_cloud, voxel_labels, point_cloud_labels, 0.2, visualize=visualize
     ))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Random walk in a Blender scene, estimate a 3D point cloud and semantic labels for each point, '
+                    'compute chamfer scores.'
+    )
+    parser.add_argument('--blend-file', type=str, required=True, help='path to Blender file')
+    parser.add_argument(
+        '--points-density', type=float, default=100.0,
+        help='ground truth point cloud density'
+    )
+    parser.add_argument(
+        '--voxel-size', type=float, default=0.1,
+        help='estimated point cloud voxel grid size'
+    )
+    parser.add_argument('--num-steps', type=int, default=100, help='number of steps for random walk')
+    parser.add_argument(
+        '--visualize', action='store_true',
+        help='visualize rendered images, estimated and ground truth point clouds, and chamfer scores'
+    )
+    args = parser.parse_args()
+    random_walk(
+        blend_file=args.blend_file,
+        points_density=args.points_density,
+        voxel_size=args.voxel_size,
+        num_steps=args.num_steps,
+        visualize=args.visualize
+    )
