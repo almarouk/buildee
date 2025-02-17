@@ -52,8 +52,9 @@ class Simulator:
         # Get the current camera
         self.camera = self.scene.camera
 
-        # Set camera clip start
+        # Set camera clip start and end
         self.camera.data.clip_start = 0.01
+        self.camera.data.clip_end = 1000.0
 
         # Get the current view layer
         self.view_layer = bpy.context.view_layer
@@ -723,7 +724,8 @@ def explore(
         blend_file: str | Path,
         points_density: float = 1.0,
         segmentation_sensitivity: float = 0.1,
-        filter_object_names: list[str] = ('CameraBounds', 'CameraSpawn'),
+        geometry_nodes_objects: list[str] = ('Generator',),
+        filter_object_names: list[str] = ('CameraBounds',),
         max_depth_distance_display: float = 10.0,
         verbose: bool = False
 ):
@@ -733,6 +735,7 @@ def explore(
         blend_file=blend_file,
         points_density=points_density,
         segmentation_sensitivity=segmentation_sensitivity,
+        geometry_nodes_objects=geometry_nodes_objects,
         filter_object_names=filter_object_names,
         verbose=verbose
     )
@@ -802,6 +805,10 @@ if __name__ == '__main__':
         help='border sensitivity for segmentation masks, higher values discard aliased edges'
     )
     parser.add_argument(
+        '--generator-objects', type=str, nargs='+', default=('Generator',),
+        help='list of generator objects, such as geometry nodes or particles, to convert to meshes'
+    )
+    parser.add_argument(
         '--filter-object-names', type=str, nargs='+', default=('CameraBounds', 'CameraSpawn'),
         help='list of object names to ignore for 3D points sampling and semantic segmentation'
     )
@@ -815,6 +822,7 @@ if __name__ == '__main__':
         blend_file=args.blend_file,
         points_density=args.points_density,
         segmentation_sensitivity=args.segmentation_sensitivity,
+        geometry_nodes_objects=args.generator_objects,
         filter_object_names=args.filter_object_names,
         max_depth_distance_display=args.max_depth_distance_display,
         verbose=args.verbose
