@@ -165,7 +165,7 @@ class Simulator:
         self.init_semantic_segmentation(segmentation_sensitivity=segmentation_sensitivity)
 
         # Setup colors for point cloud rendering
-        self.point_cloud_colors, _, _ = self.compute_point_cloud(update_mask=False)
+        self.point_cloud_colors, _, _, _ = self.compute_point_cloud(update_mask=False)
         self.point_cloud_colors -= self.point_cloud_colors.min(axis=0)
         self.point_cloud_colors /= self.point_cloud_colors.max(axis=0)
         self.point_cloud_colors = np.uint8(self.point_cloud_colors * 255)
@@ -245,6 +245,13 @@ class Simulator:
         progress_bar = tqdm.tqdm(total=len(self.objects), desc='Point clouds', disable=not self.verbose)
 
         for obj, dynamic in self.objects.items():
+
+            # if get_label(obj) == 'Terrain':
+            #     pcl_points_node.inputs['Density'].default_value = 0.1
+            # elif get_label(obj) == 'Tree':
+            #     pcl_points_node.inputs['Density'].default_value = 1.0
+            # else:
+            #     pcl_points_node.inputs['Density'].default_value = 10.0
 
             # Apply Pointcloud modifier to object
             obj_modifier = obj.modifiers.new('GeometryNodes', type='NODES')
@@ -622,7 +629,7 @@ class Simulator:
             self,
             update_mask: bool = True,
             imshow: bool = False
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Get the sampled point cloud of the scene at the current frame. Returns the point cloud in world coordinates,
         the corresponding labels for each point and a mask indicating which points are visible in the rendered image.
 
@@ -717,7 +724,7 @@ class Simulator:
             ] = self.point_cloud_colors[mask]
             cv2.imshow(f'points', point_cloud_image)
 
-        return point_cloud, point_cloud_labels, mask
+        return point_cloud, point_cloud_labels, mask, np.int64(camera_point_cloud_px)
 
 
 def explore(
