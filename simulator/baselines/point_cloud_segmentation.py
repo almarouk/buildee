@@ -10,6 +10,63 @@ from scipy.spatial import KDTree
 from ..simulator import Simulator
 
 
+def compute_miou(
+        gt_pts: np.ndarray,
+        est_pts: np.ndarray,
+        gt_labels: np.ndarray,
+        est_labels: np.ndarray,
+        dist_thresh: float,
+) -> float:
+    """Compute the mIoU between two point clouds labeled with semantic classes.
+
+    :param gt_pts: ground truth point cloud, shape (N, 3)
+    :param est_pts: estimated point cloud, shape (M, 3)
+    :param gt_labels: labels of ``gt_pts``, shape (N,)
+    :param est_labels: labels of ``est_pts``, shape (M,)
+    :param dist_thresh: mIoU only considers estimated points that are within ``dist_thresh`` of a ground truth point
+    :return: mIoU of ``est_pts`` w.r.t. ``gt_pts``
+    """
+    # Build KDTree for nearest neighbor search
+    kd = KDTree(gt_pts)
+
+    # Get nearest ground truth neighbor and its label for each estimated point
+    dists, nearest_gt_indices = kd.query(est_pts)
+    nearest_gt_labels = gt_labels[nearest_gt_indices]
+
+    # Filter out estimated points that are not close to any ground truth point
+    valid = dists < dist_thresh
+    nearest_gt_labels = nearest_gt_labels[valid]
+    est_labels = est_labels[valid]
+
+    # Get all unique labels
+    all_labels = np.unique(np.hstack([nearest_gt_labels, est_labels]))
+
+    # Compute mIoU
+    miou = 0.0
+    for label in all_labels:
+        tp = np.sum((nearest_gt_labels == label) & (est_labels == label))
+        fp = np.sum((nearest_gt_labels != label) & (est_labels == label))
+        fn = np.sum((nearest_gt_labels == label) & (est_labels != label))
+        miou += tp / (tp + fp + fn)
+
+    return miou / len(all_labels)
+
+
+def unilateral_chamfer_l1_distance(
+        pts1: np.ndarray,
+        pts2: np.ndarray
+) -> float:
+    """Compute the average L1 distance from each point in ``pts2`` to its nearest neighbor in ``pts1``.
+
+    :param pts1: reference point cloud, shape (N, 3)
+    :param pts2: point cloud to evaluate, shape (M, 3)
+    :return: Chamfer-L1 distance of ``pts2`` w.r.t. ``pts1``
+    """
+    kd = KDTree(pts1)
+    dists, _ = kd.query(pts2, p=1)
+    return dists.mean()
+
+
 def unilateral_chamfer_score(
         pts1: np.ndarray,
         pts2: np.ndarray,
@@ -157,11 +214,36 @@ def random_walk(
         visualize_point_cloud(point_cloud, point_cloud_labels, simulator.n_labels, seg_color_map.name)
 
     # Compute chamfer scores
-    print('Chamfer score - estimated points to ground truth points:', unilateral_chamfer_score(
-        point_cloud, estimated_point_cloud, point_cloud_labels, voxel_labels, 0.2, visualize=visualize
+    print('Chamfer score - estimated points w.r.t. ground truth points:', unilateral_chamfer_score(
+        pts1=point_cloud,
+        pts2=estimated_point_cloud,
+        pts1_labels=point_cloud_labels,
+        pts2_labels=voxel_labels,
+        dist_thresh=2*voxel_size,
+        visualize=visualize
     ))
-    print('Chamfer score - ground truth points to estimated points:', unilateral_chamfer_score(
-        estimated_point_cloud, point_cloud, voxel_labels, point_cloud_labels, 0.2, visualize=visualize
+    print('Chamfer score - ground truth points w.r.t. estimated points:', unilateral_chamfer_score(
+        pts1=estimated_point_cloud,
+        pts2=point_cloud,
+        pts1_labels=voxel_labels,
+        pts2_labels=point_cloud_labels,
+        dist_thresh=2*voxel_size,
+        visualize=visualize
+    ))
+
+    # Compute Chamfer-L1 distances
+    print('Chamfer-L1 distance - estimated points w.r.t. ground truth points:', unilateral_chamfer_l1_distance(
+        pts1=point_cloud,
+        pts2=estimated_point_cloud
+    ))
+    print('Chamfer-L1 distance - ground truth points w.r.t. estimated points:', unilateral_chamfer_l1_distance(
+        pts1=estimated_point_cloud,
+        pts2=point_cloud
+    ))
+
+    # Compute mIoU
+    print('mIoU:', compute_miou(
+        point_cloud, estimated_point_cloud, point_cloud_labels, voxel_labels, dist_thresh=2*voxel_size
     ))
 
 
