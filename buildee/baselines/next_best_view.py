@@ -46,7 +46,7 @@ class SimulatorEnv(gym.Env):
         # Whether to display rendered image during training
         self.show_rgb = show_rgb
 
-        # Initialize simulator, previous observations and previous observed points mask
+        # Initialize buildee, previous observations and previous observed points mask
         self.simulator = None
         self.prev_observed_points_mask = None
 
@@ -59,7 +59,7 @@ class SimulatorEnv(gym.Env):
         self.current_step = 0
 
         # Set initial camera pose
-        # self.simulator.respawn_camera()
+        # self.buildee.respawn_camera()
 
         # Render image and update point cloud
         image = self.render_image()
@@ -76,7 +76,7 @@ class SimulatorEnv(gym.Env):
         # Update current step
         self.current_step += 1
 
-        # Apply action to the simulator
+        # Apply action to the buildee
         match action:
             case 0:
                 collided = self.simulator.move_camera_forward(1)

@@ -31,7 +31,7 @@ class Simulator:
             filter_object_names: list[str] = ('CameraBounds',),
             verbose: bool = False
     ):
-        """Initialize the simulator.
+        """Initialize the buildee.
 
         :param blend_file: path to the blender file
         :param points_density: density of 3D points to sample per unit area
@@ -626,7 +626,7 @@ class Simulator:
         """Get the sampled point cloud of the scene at the current frame. Returns the point cloud in world coordinates,
         the corresponding labels for each point and a mask indicating which points are visible in the rendered image.
 
-        :param update_mask: whether to update the simulator's observed points mask
+        :param update_mask: whether to update the buildee's observed points mask
         :param imshow: whether to show an image of the point cloud in the current view
         :return: point cloud, point cloud labels, mask indicating visible points
         """
@@ -730,7 +730,7 @@ def explore(
         verbose: bool = False
 ):
     """Explore the 3D scene."""
-    # Create a simulator
+    # Create a buildee
     simulator = Simulator(
         blend_file=blend_file,
         points_density=points_density,

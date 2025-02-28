@@ -127,7 +127,7 @@ def random_walk(
         num_steps: int = 100,
         visualize: bool = False
 ):
-    # Create a simulator
+    # Create a buildee
     simulator = Simulator(
         blend_file,
         points_density=points_density,
@@ -206,7 +206,7 @@ def random_walk(
     if visualize:
         visualize_point_cloud(estimated_point_cloud, voxel_labels, simulator.n_labels, seg_color_map.name)
 
-    # Get simulator ground truth point cloud
+    # Get buildee ground truth point cloud
     point_cloud, point_cloud_labels, _ = simulator.compute_point_cloud()
 
     # Visualize ground truth point cloud
