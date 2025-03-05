@@ -29,7 +29,7 @@ class CheckpointCallback(BaseCallback):
 
 
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_dir: Path, max_steps: int = 50, show_rgb: bool = False):
+    def __init__(self, blend_dir: Path, max_steps: int = 100, show_rgb: bool = False):
         super().__init__()
         self.blend_dir = blend_dir
 

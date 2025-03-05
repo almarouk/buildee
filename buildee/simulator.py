@@ -28,7 +28,7 @@ class Simulator:
             points_density: float = 1.0,
             segmentation_sensitivity: float = 0.1,
             geometry_nodes_objects: list[str] = ('Generator',),
-            filter_object_names: list[str] = ('CameraBounds',),
+            filter_object_names: list[str] = ('CameraBounds',),  # TODO: remove param it's confusing
             verbose: bool = False
     ):
         """Initialize the buildee.
