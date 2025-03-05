@@ -99,7 +99,7 @@ class SimulatorEnv(gym.Env):
 
         # Render image and update point cloud
         image = self.render_image()
-        self.simulator.compute_point_cloud(update_mask=True, imshow=True)
+        self.simulator.compute_point_cloud(update_mask=True, imshow=False)
 
         # Display rendered image
         if self.show_rgb:
