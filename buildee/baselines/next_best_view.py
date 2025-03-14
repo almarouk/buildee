@@ -29,9 +29,9 @@ class CheckpointCallback(BaseCallback):
 
 
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_dir: Path, max_steps: int = 100, show_rgb: bool = False):
+    def __init__(self, blend_file: Path, max_steps: int = 100, show_rgb: bool = False):
         super().__init__()
-        self.blend_dir = blend_dir
+        self.blend_file = blend_file
 
         # Define maximum number of steps
         self.max_steps = max_steps
@@ -51,15 +51,11 @@ class SimulatorEnv(gym.Env):
         self.prev_observed_points_mask = None
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
-        # Load a random scene
-        blend_file = np.random.choice(list(self.blend_dir.glob('*.blend')))
-        self.simulator = Simulator(blend_file, points_density=100.0, verbose=True)
+        # Load the scene
+        self.simulator = Simulator(self.blend_file, points_density=100.0, verbose=True)
 
         # Reset current step
         self.current_step = 0
-
-        # Set initial camera pose
-        # self.buildee.respawn_camera()
 
         # Render image and update point cloud
         image = self.render_image()
@@ -132,9 +128,9 @@ class SimulatorEnv(gym.Env):
         return coverage_gain
 
 
-def load_model(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False) -> tuple[PPO, CheckpointCallback]:
+def load_model(blend_file: Path, checkpoint_path: str, show_rgb: bool = False) -> tuple[PPO, CheckpointCallback]:
     # Setup environment, logger, and checkpointer
-    env = SimulatorEnv(blend_dir=blend_dir, show_rgb=show_rgb)
+    env = SimulatorEnv(blend_file=blend_file, show_rgb=show_rgb)
     lgr = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
     checkpointer = CheckpointCallback(save_freq=1000, save_path=os.path.splitext(checkpoint_path)[0], verbose=1)
 
@@ -156,10 +152,10 @@ def load_model(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False) ->
     return model, checkpointer
 
 
-def main(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False):
+def main(blend_file: Path, checkpoint_path: str, show_rgb: bool = False):
     # Load model and checkpointer
     model, checkpointer = load_model(
-        blend_dir=blend_dir,
+        blend_file=blend_file,
         checkpoint_path=checkpoint_path,
         show_rgb=show_rgb
     )
@@ -170,15 +166,14 @@ def main(blend_dir: Path, checkpoint_path: str, show_rgb: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Explore a Blender 3D scene.')
-    parser.add_argument('--blend-dir', type=Path, required=True,
-                        help='path to the directory containing Blender scenes')
+    parser.add_argument('--blend-file', type=Path, required=True, help='path to the Blender file')
     parser.add_argument(
         '--checkpoint-path', type=str, default='checkpoint.zip', help='path to the .zip checkpoint file'
     )
     parser.add_argument('--show-rgb', action='store_true', help='whether to display the rendered image')
     args = parser.parse_args()
     main(
-        blend_dir=args.blend_dir,
+        blend_file=args.blend_file,
         checkpoint_path=args.checkpoint_path,
         show_rgb=args.show_rgb
     )
