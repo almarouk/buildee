@@ -46,13 +46,17 @@ class SimulatorEnv(gym.Env):
         # Whether to display rendered image during training
         self.show_rgb = show_rgb
 
-        # Initialize buildee, previous observations and previous observed points mask
-        self.simulator = None
+        # Initialize simulator, initial pose and previous observed points mask
+        self.simulator = Simulator(self.blend_file, points_density=100.0, verbose=True)
+        self.init_world_from_camera = self.simulator.get_world_from_camera()
         self.prev_observed_points_mask = None
 
     def reset(self, seed: int = None, options: dict = None) -> (gym.core.ObsType, dict):
-        # Load the scene
-        self.simulator = Simulator(self.blend_file, points_density=100.0, verbose=True)
+        # Reset camera pose
+        self.simulator.set_world_from_camera(self.init_world_from_camera, check_collisions=False)
+
+        # Reset observed point mask
+        self.simulator.observed_points_mask = np.zeros(self.simulator.n_points, dtype=bool)
 
         # Reset current step
         self.current_step = 0
