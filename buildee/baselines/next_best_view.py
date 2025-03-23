@@ -113,10 +113,9 @@ class SimulatorEnv(gym.Env):
 
         if collided:
             terminated = True
-            reward = -1.0 * self.max_steps
+            reward = -1.0
         elif is_last_step:
             terminated = True
-            reward = self.simulator.observed_points_mask.mean() * self.max_steps
 
         return image, reward, terminated, False, {}
 
@@ -173,7 +172,7 @@ def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_
     )
 
     if train:  # Train model
-        model.learn(total_timesteps=10000000, callback=checkpointer)
+        model.learn(total_timesteps=40000000, callback=checkpointer)
 
     else:  # Evaluate model
         obs, _ = env.reset()
