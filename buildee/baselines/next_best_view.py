@@ -151,7 +151,7 @@ def load_model(
         print(f'Loading model from {checkpoint_path}')
         model = PPO.load(checkpoint_path, env=env, verbose=1)
     else:
-        print('Creating new model')
+        print(f'{checkpoint_path} not found, creating new model')
         model = PPO(
             'CnnPolicy',
             env,
