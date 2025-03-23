@@ -132,11 +132,20 @@ class SimulatorEnv(gym.Env):
         return coverage_gain
 
 
-def load_model(blend_file: Path, checkpoint_path: str, show_rgb: bool = False) -> tuple[PPO, CheckpointCallback]:
+def load_model(
+        blend_file: Path,
+        show_rgb: bool = False
+) -> tuple[PPO, SimulatorEnv, CheckpointCallback]:
+    # Parse checkpoint stem
+    scene_name = blend_file.stem
+
+    # Setup checkpoint path from scene name
+    checkpoint_path = f'{scene_name}.zip'
+
     # Setup environment, logger, and checkpointer
     env = SimulatorEnv(blend_file=blend_file, show_rgb=show_rgb)
-    lgr = logger.configure('logs', ['stdout', 'csv', 'tensorboard'])
-    checkpointer = CheckpointCallback(save_freq=1000, save_path=os.path.splitext(checkpoint_path)[0], verbose=1)
+    lgr = logger.configure(f'logs/{scene_name}', ['stdout', 'csv', 'tensorboard'])
+    checkpointer = CheckpointCallback(save_freq=1000, save_path=scene_name, verbose=1)
 
     # Load or create model
     if os.path.exists(checkpoint_path):
@@ -153,31 +162,49 @@ def load_model(blend_file: Path, checkpoint_path: str, show_rgb: bool = False) -
     # Set logger
     model.set_logger(lgr)
 
-    return model, checkpointer
+    return model, env, checkpointer
 
 
-def main(blend_file: Path, checkpoint_path: str, show_rgb: bool = False):
+def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_rgb: bool = False):
     # Load model and checkpointer
-    model, checkpointer = load_model(
+    model, env, checkpointer = load_model(
         blend_file=blend_file,
-        checkpoint_path=checkpoint_path,
         show_rgb=show_rgb
     )
 
-    # Train model
-    model.learn(total_timesteps=10000000, callback=checkpointer)
+    if train:  # Train model
+        model.learn(total_timesteps=10000000, callback=checkpointer)
+
+    else:  # Evaluate model
+        obs, _ = env.reset()
+        coverages = [env.simulator.observed_points_mask.mean()]
+
+        for _ in range(env.max_steps):
+
+            if random_walk:
+                action = np.array(np.random.randint(0, 8))
+            else:
+                action, _ = model.predict(obs, deterministic=True)
+
+            obs, _, _, _, _ = env.step(action)
+            coverages.append(env.simulator.observed_points_mask.mean())
+
+        scene_coverage_auc = np.trapz(coverages, np.linspace(0, 1, len(coverages)))
+        print(f'Scene coverage AUC: {scene_coverage_auc}')
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Explore a Blender 3D scene.')
     parser.add_argument('--blend-file', type=Path, required=True, help='path to the Blender file')
+    parser.add_argument('--train', action='store_true', help='whether to train the model or evaluate it')
     parser.add_argument(
-        '--checkpoint-path', type=str, default='checkpoint.zip', help='path to the .zip checkpoint file'
+        '--random-walk', action='store_true', help='evaluate random walk instead of PPO model'
     )
     parser.add_argument('--show-rgb', action='store_true', help='whether to display the rendered image')
     args = parser.parse_args()
     main(
         blend_file=args.blend_file,
-        checkpoint_path=args.checkpoint_path,
+        train=args.train,
+        random_walk=args.random_walk,
         show_rgb=args.show_rgb
     )
