@@ -106,16 +106,9 @@ class SimulatorEnv(gym.Env):
             cv2.imshow(f'rgb', cv2.cvtColor(np.moveaxis(image, 0, 2), cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
 
-        # Get reward, termination, and truncation
-        is_last_step = self.current_step >= self.max_steps
-        terminated = False
+        # Get reward and termination
         reward = self.compute_coverage_gain()
-
-        if collided:
-            terminated = True
-            reward = -1.0
-        elif is_last_step:
-            terminated = True
+        terminated = self.current_step >= self.max_steps
 
         return image, reward, terminated, False, {}
 
