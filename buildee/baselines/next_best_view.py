@@ -4,7 +4,9 @@ from pathlib import Path
 
 from ..simulator import Simulator
 
+import bpy
 import cv2
+import mathutils
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
@@ -171,7 +173,15 @@ def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_
         obs, _ = env.reset()
         coverages = [env.simulator.observed_points_mask.mean()]
 
-        for _ in range(env.max_steps):
+        # Add a BezierCurve to the scene
+        bpy.ops.curve.primitive_bezier_curve_add()
+        curve_obj = bpy.data.objects["BézierCurve"]
+        curve_data = curve_obj.data
+        spline = curve_data.splines[0]
+        spline.bezier_points[0].co = env.simulator.camera.matrix_world.translation
+        last_bezier_idx = 0
+
+        for step in range(env.max_steps):
 
             if random_walk:
                 action = np.array(np.random.randint(0, 8))
@@ -181,8 +191,19 @@ def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_
             obs, _, _, _, _ = env.step(action)
             coverages.append(env.simulator.observed_points_mask.mean())
 
+            current_camera_pose = env.simulator.camera.matrix_world.translation
+            camera_diff = current_camera_pose - spline.bezier_points[last_bezier_idx].co
+            if camera_diff.length > 0.01:
+                if last_bezier_idx > 0:
+                    spline.bezier_points.add(1)
+                last_bezier_idx += 1
+                spline.bezier_points[last_bezier_idx].co = current_camera_pose
+
         scene_coverage_auc = np.trapz(coverages, np.linspace(0, 1, len(coverages)))
         print(f'Scene coverage AUC: {scene_coverage_auc}')
+
+        # Save blender file
+        bpy.ops.wm.save_as_mainfile(filepath=f'nbvtrajectory.blend')
 
 
 if __name__ == "__main__":
