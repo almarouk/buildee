@@ -107,7 +107,7 @@ class SimulatorEnv(gym.Env):
             cv2.waitKey(1)
 
         # Get reward and termination
-        reward = self.compute_coverage_gain()
+        reward = self.compute_coverage_gain() * 100.0
         terminated = self.current_step >= self.max_steps
 
         return image, reward, terminated, False, {}
