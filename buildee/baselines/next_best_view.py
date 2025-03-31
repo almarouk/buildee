@@ -47,7 +47,7 @@ class SimulatorEnv(gym.Env):
         self.show_rgb = show_rgb
 
         # Initialize simulator, initial pose and previous observed points mask
-        self.simulator = Simulator(self.blend_file, points_density=100.0, verbose=True)
+        self.simulator = Simulator(self.blend_file, points_density=10.0, max_pcl_depth=20.0, verbose=True)
         self.init_world_from_camera = self.simulator.get_world_from_camera()
         self.prev_observed_points_mask = None
 

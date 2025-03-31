@@ -27,6 +27,7 @@ class Simulator:
             blend_file: str | Path,
             points_density: float = 1.0,
             segmentation_sensitivity: float = 0.1,
+            max_pcl_depth: float = np.inf,
             geometry_nodes_objects: list[str] = ('Generator',),
             filter_object_names: list[str] = ('CameraBounds',),  # TODO: remove param it's confusing
             verbose: bool = False
@@ -41,6 +42,9 @@ class Simulator:
         """
         # Set verbose mode
         self.verbose = verbose
+
+        # Set maximum point cloud depth
+        self.max_pcl_depth = max_pcl_depth
 
         # Load blender file
         with suppress_output(self.verbose):
@@ -671,7 +675,7 @@ class Simulator:
 
         # Filter points that are outside the image plane
         mask &= (
-                (camera_point_cloud[2] > 0) &
+                (camera_point_cloud[2] > 0) & (camera_point_cloud[2] < self.max_pcl_depth) &
                 (0 <= camera_point_cloud_px[0]) & (camera_point_cloud_px[0] < image_width) &
                 (0 <= camera_point_cloud_px[1]) & (camera_point_cloud_px[1] < image_height)
         )
