@@ -31,7 +31,7 @@ class CheckpointCallback(BaseCallback):
 
 
 class SimulatorEnv(gym.Env):
-    def __init__(self, blend_file: Path, max_steps: int = 100, show_rgb: bool = False):
+    def __init__(self, blend_file: Path, max_steps: int = 500, show_rgb: bool = False):
         super().__init__()
         self.blend_file = blend_file
 
@@ -43,13 +43,13 @@ class SimulatorEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
 
         # Define action space: xyz and yaw
-        self.action_space = gym.spaces.Discrete(8)
+        self.action_space = gym.spaces.Discrete(5)
 
         # Whether to display rendered image during training
         self.show_rgb = show_rgb
 
         # Initialize simulator, initial pose and previous observed points mask
-        self.simulator = Simulator(self.blend_file, points_density=100.0, verbose=True)
+        self.simulator = Simulator(self.blend_file, points_density=10.0, max_pcl_depth=20.0, verbose=True)
         self.init_world_from_camera = self.simulator.get_world_from_camera()
         self.prev_observed_points_mask = None
 
@@ -83,25 +83,25 @@ class SimulatorEnv(gym.Env):
             case 0:
                 collided = self.simulator.move_camera_forward(1)
             case 1:
-                collided = self.simulator.move_camera_forward(-1)
-            case 2:
-                collided = self.simulator.move_camera_down(1)
-            case 3:
-                collided = self.simulator.move_camera_down(-1)
-            case 4:
-                collided = self.simulator.move_camera_right(1)
-            case 5:
                 collided = self.simulator.move_camera_right(-1)
-            case 6:
-                collided = self.simulator.turn_camera_right(22.5, degrees=True)
-            case 7:
-                collided = self.simulator.turn_camera_right(-22.5, degrees=True)
+            case 2:
+                collided = self.simulator.move_camera_right(-1)
+            case 3:
+                collided = self.simulator.turn_camera_right(22.5)
+            case 4:
+                collided = self.simulator.turn_camera_right(-22.5)
+            case 5:
+                collided = self.simulator.move_camera_forward(1)
+                while collided:
+                    random_turn = (np.random.rand() - 0.5) * 2 * 180
+                    self.simulator.turn_camera_right(random_turn)
+                    collided = self.simulator.move_camera_forward(1)
             case _:
                 raise ValueError(f'Invalid action: {action}')
 
         # Render image and update point cloud
         image = self.render_image()
-        self.simulator.compute_point_cloud(update_mask=True, imshow=False)
+        self.simulator.compute_point_cloud(update_mask=True, imshow=True)
 
         # Display rendered image
         if self.show_rgb:
@@ -109,7 +109,7 @@ class SimulatorEnv(gym.Env):
             cv2.waitKey(1)
 
         # Get reward and termination
-        reward = self.compute_coverage_gain()
+        reward = self.compute_coverage_gain() * 100.0
         terminated = self.current_step >= self.max_steps
 
         return image, reward, terminated, False, {}
@@ -159,7 +159,13 @@ def load_model(
     return model, env, checkpointer
 
 
-def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_rgb: bool = False):
+def main(
+        blend_file: Path,
+        train: bool = False,
+        random_walk: bool = False,
+        random_star: bool = False,
+        show_rgb: bool = False
+):
     # Load model and checkpointer
     model, env, checkpointer = load_model(
         blend_file=blend_file,
@@ -184,7 +190,9 @@ def main(blend_file: Path, train: bool = False, random_walk: bool = False, show_
         for step in range(env.max_steps):
 
             if random_walk:
-                action = np.array(np.random.randint(0, 8))
+                action = np.array(np.random.randint(0, 5))
+            elif random_star:
+                action = np.array(5)
             else:
                 action, _ = model.predict(obs, deterministic=True)
 
@@ -210,14 +218,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Explore a Blender 3D scene.')
     parser.add_argument('--blend-file', type=Path, required=True, help='path to the Blender file')
     parser.add_argument('--train', action='store_true', help='whether to train the model or evaluate it')
-    parser.add_argument(
-        '--random-walk', action='store_true', help='evaluate random walk instead of PPO model'
-    )
+    parser_random_walk = parser.add_mutually_exclusive_group()
+    parser_random_walk.add_argument('--random-walk', action='store_true',
+                                    help='evaluate random walk instead of PPO model')
+    parser_random_walk.add_argument('--random-star', action='store_true',
+                                    help='evaluate random walk* instead of PPO model')
     parser.add_argument('--show-rgb', action='store_true', help='whether to display the rendered image')
     args = parser.parse_args()
     main(
         blend_file=args.blend_file,
         train=args.train,
         random_walk=args.random_walk,
+        random_star=args.random_star,
         show_rgb=args.show_rgb
     )
