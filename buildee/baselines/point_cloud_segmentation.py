@@ -176,23 +176,17 @@ def random_walk(
             cv2.waitKey(7)
 
         # Move camera in a random direction
-        action = np.random.randint(8)
+        action = np.random.randint(5)
         match action:
             case 0:
-                simulator.move_camera_forward(1)
+                simulator.move_camera_forward(3)
             case 1:
-                simulator.move_camera_forward(-1)
+                simulator.move_camera_right(3)
             case 2:
-                simulator.move_camera_down(1)
+                simulator.move_camera_right(-3)
             case 3:
-                simulator.move_camera_down(-1)
-            case 4:
-                simulator.move_camera_right(1)
-            case 5:
-                simulator.move_camera_right(-1)
-            case 6:
                 simulator.turn_camera_right(22.5, degrees=True)
-            case 7:
+            case 4:
                 simulator.turn_camera_right(-22.5, degrees=True)
 
     # Destroy opencv windows
