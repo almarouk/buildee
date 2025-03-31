@@ -49,7 +49,7 @@ class SimulatorEnv(gym.Env):
         self.show_rgb = show_rgb
 
         # Initialize simulator, initial pose and previous observed points mask
-        self.simulator = Simulator(self.blend_file, points_density=10.0, max_pcl_depth=20.0, verbose=True)
+        self.simulator = Simulator(self.blend_file, points_density=5.0, max_pcl_depth=20.0, verbose=True)
         self.init_world_from_camera = self.simulator.get_world_from_camera()
         self.prev_observed_points_mask = None
 
@@ -81,21 +81,21 @@ class SimulatorEnv(gym.Env):
         # Apply action to the buildee
         match action:
             case 0:
-                collided = self.simulator.move_camera_forward(1)
+                collided = self.simulator.move_camera_forward(3)
             case 1:
-                collided = self.simulator.move_camera_right(-1)
+                collided = self.simulator.move_camera_right(-3)
             case 2:
-                collided = self.simulator.move_camera_right(-1)
+                collided = self.simulator.move_camera_right(-3)
             case 3:
                 collided = self.simulator.turn_camera_right(22.5)
             case 4:
                 collided = self.simulator.turn_camera_right(-22.5)
             case 5:
-                collided = self.simulator.move_camera_forward(1)
+                collided = self.simulator.move_camera_forward(3)
                 while collided:
                     random_turn = (np.random.rand() - 0.5) * 2 * 180
                     self.simulator.turn_camera_right(random_turn)
-                    collided = self.simulator.move_camera_forward(1)
+                    collided = self.simulator.move_camera_forward(3)
             case _:
                 raise ValueError(f'Invalid action: {action}')
 
