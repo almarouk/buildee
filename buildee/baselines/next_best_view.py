@@ -1,5 +1,6 @@
 import argparse
 import os.path
+import tqdm
 from pathlib import Path
 
 from ..simulator import Simulator
@@ -174,23 +175,28 @@ def main(
         model.learn(total_timesteps=40000000, callback=checkpointer)
 
     else:  # Evaluate model
-        obs, _ = env.reset()
-        coverages = [env.simulator.observed_points_mask.mean()]
+        all_scores = []
+        for _ in range(10):
+            obs, _ = env.reset()
+            coverages = [env.simulator.observed_points_mask.mean()]
 
-        for _ in range(env.max_steps):
+            for _ in tqdm.tqdm(range(env.max_steps)):
 
-            if random_walk:
-                action = np.array(np.random.randint(0, 5))
-            elif random_star:
-                action = np.array(5)
-            else:
-                action, _ = model.predict(obs, deterministic=True)
+                if random_walk:
+                    action = np.array(np.random.randint(0, 5))
+                elif random_star:
+                    action = np.array(5)
+                else:
+                    action, _ = model.predict(obs, deterministic=True)
 
-            obs, _, _, _, _ = env.step(action)
-            coverages.append(env.simulator.observed_points_mask.mean())
+                obs, _, _, _, _ = env.step(action)
+                coverages.append(env.simulator.observed_points_mask.mean())
 
-        scene_coverage_auc = np.trapz(coverages, np.linspace(0, 1, len(coverages)))
-        print(f'Scene coverage AUC: {scene_coverage_auc}')
+            scene_coverage_auc = np.trapz(coverages, np.linspace(0, 1, len(coverages)))
+            print(f'Scene coverage AUC: {scene_coverage_auc}')
+            all_scores.append(scene_coverage_auc)
+        print(all_scores)
+        np.save(f'{blend_file.stem}_scores{"normal" if random_walk else ""}.npy', np.array(all_scores))
 
 
 if __name__ == "__main__":

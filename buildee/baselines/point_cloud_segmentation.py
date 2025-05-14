@@ -100,7 +100,18 @@ def unilateral_chamfer_score(
         vis_labels = np.zeros_like(pts2_labels)
         vis_labels[~matching_labels] = 1
         vis_labels[~matching_dists] = 2
-        visualize_point_cloud(pts2, vis_labels - 1, 2)
+        colors = np.zeros((len(vis_labels), 3))
+        colors[vis_labels == 0] = np.array([65, 105, 225]) / 255.0
+        colors[vis_labels == 1] = np.array([218, 165, 32]) / 255.0
+        colors[vis_labels == 2] = np.array([220, 20, 60]) / 255.0
+        pcl = o3d.geometry.PointCloud()
+        pcl.points = o3d.utility.Vector3dVector(pts2)
+        pcl.colors = o3d.utility.Vector3dVector(colors)
+
+        # Save point cloud
+        o3d.io.write_point_cloud('chamfer.ply', pcl)
+        o3d.visualization.draw_geometries([pcl])
+        # visualize_point_cloud(pts2, vis_labels - 1, 2)
 
     return chamfer_score.item()
 
