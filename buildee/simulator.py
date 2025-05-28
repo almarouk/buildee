@@ -29,7 +29,6 @@ class Simulator:
             segmentation_sensitivity: float = 0.1,
             max_pcl_depth: float = np.inf,
             geometry_nodes_objects: list[str] = ('Generator',),
-            filter_object_names: list[str] = ('CameraBounds',),  # TODO: remove param it's confusing
             verbose: bool = False
     ):
         """Initialize the buildee.
@@ -80,10 +79,7 @@ class Simulator:
 
         # Get all visible objects
         self.objects = OrderedDict([
-            (obj, is_animated(obj)) for obj in get_visible_objects(
-                self.view_layer.layer_collection,
-                filter_names=filter_object_names
-            )
+            (obj, is_animated(obj)) for obj in get_visible_objects(self.view_layer.layer_collection)
         ])
 
         # Get vertices and polygons of each object for point cloud occlusion checking
@@ -729,7 +725,6 @@ def explore(
         points_density: float = 1.0,
         segmentation_sensitivity: float = 0.1,
         geometry_nodes_objects: list[str] = ('Generator',),
-        filter_object_names: list[str] = ('CameraBounds',),
         max_depth_distance_display: float = 10.0,
         verbose: bool = False
 ):
@@ -740,7 +735,6 @@ def explore(
         points_density=points_density,
         segmentation_sensitivity=segmentation_sensitivity,
         geometry_nodes_objects=geometry_nodes_objects,
-        filter_object_names=filter_object_names,
         verbose=verbose
     )
 
@@ -813,11 +807,7 @@ if __name__ == '__main__':
         help='list of generator objects, such as geometry nodes or particles, to convert to meshes'
     )
     parser.add_argument(
-        '--filter-object-names', type=str, nargs='+', default=('CameraBounds', 'CameraSpawn'),
-        help='list of object names to ignore for 3D points sampling and semantic segmentation'
-    )
-    parser.add_argument(
-        '--max-depth-distance_display', type=float, default=10.0,
+        '--max-depth-distance-display', type=float, default=10.0,
         help='maximum depth distance to display'
     )
     parser.add_argument('--verbose', action='store_true', help='print debug information')
@@ -827,7 +817,6 @@ if __name__ == '__main__':
         points_density=args.points_density,
         segmentation_sensitivity=args.segmentation_sensitivity,
         geometry_nodes_objects=args.generator_objects,
-        filter_object_names=args.filter_object_names,
         max_depth_distance_display=args.max_depth_distance_display,
         verbose=args.verbose
     )
