@@ -6,7 +6,7 @@ This repository hosts [Buildee](https://openreview.net/forum?id=1LmsiOaMTy), a 3
 Python module on top of Blender. With Buildee, you can explore a 3D scene and generate realistic RGB, depth, and
 semantic segmentation maps. Buildee is also equipped to track 2D / 3D points and perform occlusion checking.
 
-
+https://github.com/user-attachments/assets/699ba33d-6e19-4191-82b5-407f075b7808
 
 ## Installation
 
