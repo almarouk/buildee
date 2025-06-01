@@ -1,14 +1,24 @@
+# Buildee: A 3D Simulation Framework for Scene Exploration and Reconstruction with Understanding
+
+[Paper](https://openreview.net/forum?id=1LmsiOaMTy) • [Project page](https://clementinboittiaux.github.io/buildee/)
+
+This repository hosts [Buildee](https://openreview.net/forum?id=1LmsiOaMTy), a 3D simulation framework built as a
+Python module on top of Blender. With Buildee, you can explore a 3D scene and generate realistic RGB, depth, and
+semantic segmentation maps. Buildee is also equipped to track 2D / 3D points and perform occlusion checking.
+
+
+
 ## Installation
 
 Clone the repository with submodules:
 ```bash
-git clone --recursive https://github.com/clementinboittiaux/blender-construction.git
+git clone --recursive https://github.com/clementinboittiaux/buildee.git
 ```
 
 Setup the conda environment:
 ```bash
-conda create -n blender python=3.11
-conda activate blender
+conda create -n buildee python=3.11
+conda activate buildee
 ```
 
 Install the numpy version required by blender:
@@ -20,7 +30,7 @@ With the conda environment **activated**,
 [build blender](https://developer.blender.org/docs/handbook/building_blender/linux/#__tabbed_2_2)
 [as a python module](https://developer.blender.org/docs/handbook/building_blender/python_module/):
 ```bash
-cd blender-construction/blender
+cd buildee/blender
 ./build_files/build_environment/install_linux_packages.py  # update dependencies
 ./build_files/utils/make_update.py --use-linux-libraries  # update dependencies
 make bpy  # build bpy module
@@ -29,29 +39,44 @@ python3 ./build_files/utils/make_bpy_wheel.py ../build_linux_bpy/bin/  # create 
 
 Then, install blender's `bpy` python module:
 ```bash
-pip3 install ../build_linux_bpy/bin/bpy-4.4.0a0-cp311-cp311-manylinux_2_31_x86_64.whl
+pip3 install ../build_linux_bpy/bin/bpy-4.4.0a0-cp311-cp311-manylinux_2_35_x86_64.whl
 ```
 
 Install your compatible [PyTorch](https://pytorch.org/) version. Then install other requirements:
 ```bash
+cd ..
 pip install -r requirements.txt
+```
+
+Finally, install Buildee as a package:
+```bash
+pip install -e .
 ```
 
 #### Troubleshooting
 When installing on a headless server, remember to disable X11 forwarding.
 
 
-## Training
+## Usage
 
-We provide a toy reinforcement learning application, showing how to use our blender wrapper to train a next-best-view
-agent.
+With Buildee, you can start your simulation in just a few lines of code. The following example shows how to:
+1. Load a Blender scene.
+2. Render RGB image, depth map, and segmentation map.
+3. Compute the current point cloud of the scene (dynamic points positions may change over time).
+4. Step forward the simulation to the next frame.
 
-### Additional dependencies
-Training this agent requires TimeSformer, an efficient video model that can be easily installed from the
-[repository](https://github.com/facebookresearch/TimeSformer).
+```py
+from buildee import Simulator
 
-### Pre-trained weights
-You can download pre-trained TimeSformer weights from the
-[TimeSformer repository](https://github.com/facebookresearch/TimeSformer).
-We use [these weights](https://www.dropbox.com/s/4h2qt41m2z3aqrb/TimeSformer_divST_8x32_224_K600.pyth?dl=0),
-pre-trained on the K600 dataset using 8 frames. 
+sim = Simulator(
+    blend_file='file.blend',
+    points_density=10.0,
+    verbose=True
+)
+
+rgb, depth, labels = sim.render()
+
+pcl, pcl_labels, pcl_visibility_mask = sim.compute_point_cloud(imshow=True)
+
+sim.step_frame()
+```
