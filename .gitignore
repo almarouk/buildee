@@ -1,3 +1,7 @@
 .idea/
 logs/
 build_linux_bpy/
+__pycache__/
+*.egg-info/
+.vscode/
+*.code-workspace
