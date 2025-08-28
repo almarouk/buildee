@@ -1,3 +1,6 @@
 [submodule "blender"]
 	path = blender
 	url = https://projects.blender.org/blender/blender.git
+[submodule "blender-seed-randomizer"]
+	path = blender-seed-randomizer
+	url = https://github.com/almarouk/blender-seed-randomizer.git
